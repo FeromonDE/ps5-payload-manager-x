@@ -146,6 +146,42 @@ static int storage_copy(const char *source, const char *destination) {
     return rc || memcmp(expected, actual, sizeof(actual)) ? -1 : 0;
 }
 
+int slot_is_homebrew_name(const char *path) {
+    if (!path) return 0;
+    const char *ext = strrchr(path, '.');
+    return ext && strcasecmp(ext, ".exfat") == 0;
+}
+
+/* ".exfat" files are homebrew, not payloads/slots: install = copy the file into
+ * HOMEBREW_DIR (/data/homebrew), flat, keeping its filename. Shared by the upload
+ * and repository install paths. Consumes `source` on success. Returns 0 on success. */
+int slot_install_homebrew(const char *filename, const char *source,
+                          char *msg_buf, size_t msg_buf_size) {
+    if (!filename || filename[0] == '.' || strchr(filename, '/') || strstr(filename, "..")) {
+        snprintf(msg_buf, msg_buf_size, "Invalid filename");
+        return -1;
+    }
+    if (ensure_dir_recursive(HOMEBREW_DIR) != 0) {
+        snprintf(msg_buf, msg_buf_size, "Failed to create " HOMEBREW_DIR);
+        return -1;
+    }
+    char dest[512];
+    snprintf(dest, sizeof(dest), "%s/%s", HOMEBREW_DIR, filename);
+    remove(dest);
+    if (rename(source, dest) != 0) {
+        /* Cross-device (temp on a different fs): verified byte-copy, then drop source. */
+        if (storage_copy(source, dest) != 0) {
+            remove(dest);
+            snprintf(msg_buf, msg_buf_size, "Copy to " HOMEBREW_DIR " failed");
+            return -1;
+        }
+        remove(source);
+    }
+    pldmgr_log("[PLDMGR] Homebrew install: %s -> %s\n", filename, dest);
+    snprintf(msg_buf, msg_buf_size, "Installed %s to homebrew", filename);
+    return 0;
+}
+
 /* The journal names a validated sibling. If old exists but the public slot
  * does not, publication never happened: restore old. Otherwise the public
  * directory is the committed version. Staging and backups are then garbage.

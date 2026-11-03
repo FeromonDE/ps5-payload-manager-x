@@ -91,6 +91,12 @@ int slot_version_compare(const char *v1, const char *v2);
 /* One-time migration on startup (payloads/.layout = 2) */
 int slot_migrate_legacy(void);
 
+/* ".exfat" files are homebrew, not payloads: slot_install_homebrew copies the
+ * file into /data/homebrew (flat), consuming `source` on success. */
+int slot_is_homebrew_name(const char *path);
+int slot_install_homebrew(const char *filename, const char *source,
+                          char *msg_buf, size_t msg_buf_size);
+
 /* Retrieve a complete valid legacy paths map and clear its file on success.
  * Returns -1 if unavailable, -2 if invalid/too large (file retained). */
 int slot_pop_legacy_paths_json(char *buf, size_t buf_size);

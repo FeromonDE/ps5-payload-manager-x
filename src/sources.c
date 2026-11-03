@@ -1013,9 +1013,9 @@ int sources_repo_install(const char *source_url, const char *id,
 
     /* ".exfat" entries aren't payloads/slots — drop the verified file into
      * /data/homebrew (flat) and return, bypassing the slot system entirely. */
-    if (payload_mgr_is_homebrew_name(entry->filename)) {
+    if (slot_is_homebrew_name(entry->filename)) {
         char hb_msg[256];
-        int rc = payload_mgr_install_homebrew(entry->filename, part_path, hb_msg, sizeof(hb_msg));
+        int rc = slot_install_homebrew(entry->filename, part_path, hb_msg, sizeof(hb_msg));
         char hb_e[6 * 256];
         json_escape_checked(&jb, hb_msg, hb_e, sizeof(hb_e));
         free(entry);

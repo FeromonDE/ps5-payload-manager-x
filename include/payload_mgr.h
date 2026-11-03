@@ -19,11 +19,6 @@ int payload_mgr_import_to_storage_mode(const char *filename, const char *temp_pa
                                        char *msg_buf, size_t msg_buf_size,
                                        char *out_slot, size_t out_slot_size);
 
-/* ".exfat" files install by being copied into /data/homebrew (not a payload). */
-int payload_mgr_is_homebrew_name(const char *path);
-int payload_mgr_install_homebrew(const char *filename, const char *source_path,
-                                 char *msg_buf, size_t msg_buf_size);
-
 /* Check if payload exists for web upload check */
 int payload_mgr_check_existing(const char *filename, char *out_json, size_t out_size);
 
