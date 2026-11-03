@@ -102,9 +102,9 @@
  * just copies it here (flat). Shared path (NOT data-root-scoped) by design. */
 #define HOMEBREW_DIR "/data/homebrew"
 #define REPOSITORY_SOURCE_URL                                                  \
-  "https://bsk193.github.io/ps5-payloads-mirror/payloads_v2.json"
+  "https://bsk193.github.io/ps5-payloads-mirror-x/payloads_v2.json"
 #define LEGACY_REPOSITORY_SOURCE_URL                                           \
-  "https://bsk193.github.io/ps5-payloads-mirror/payloads.json"
+  "https://bsk193.github.io/ps5-payloads-mirror-x/payloads.json"
 #define REPOSITORY_REFRESH_INTERVAL_SEC 10800
 
 /* Logging (implementation in log_server.c) */

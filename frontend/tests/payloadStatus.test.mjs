@@ -224,7 +224,7 @@ test('resolveSourceDisplayName resolves friendly name from sources or URL', () =
 
   // 3. Fallback for official mirror URL
   assert.equal(
-    resolveSourceDisplayName({ source_url: 'https://bsk193.github.io/ps5-payloads-mirror/payloads.json' }, []),
+    resolveSourceDisplayName({ source_url: 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads.json' }, []),
     'Official Repository'
   );
 
@@ -276,7 +276,7 @@ test('isGitHubUrl accurately identifies GitHub repo URLs vs third party URLs', (
 });
 
 test('self-update is always installed, only newer versions offer an update, and pending versions suppress it', () => {
-  const srcUrl = 'https://bsk193.github.io/ps5-payloads-mirror/payloads.json/';
+  const srcUrl = 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads.json/';
   const payload = { id: 'pldmgrx', version: 'v0.6.0', checksum: 'new' };
   const self = { running_version: '0.5.2', pending_version: '' };
   const items = [{ kind: 'repo', id: 'pldmgrx', source_url: OTHER_URL, version: '0.5.1' }];
@@ -297,9 +297,9 @@ test('self-update is always installed, only newer versions offer an update, and 
 test('isOfficialSource accurately identifies official repo names and urls', () => {
   assert.equal(isOfficialSource('Official Repository'), true);
   assert.equal(isOfficialSource('official repository'), true);
-  assert.equal(isOfficialSource(null, 'https://bsk193.github.io/ps5-payloads-mirror/payloads_v2.json'), true);
-  assert.equal(isOfficialSource(null, 'https://bsk193.github.io/ps5-payloads-mirror/payloads.json'), true);
-  assert.equal(isOfficialSource(null, 'https://bsk193.github.io/ps5-payloads-mirror/payloads.json/'), true);
+  assert.equal(isOfficialSource(null, 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads_v2.json'), true);
+  assert.equal(isOfficialSource(null, 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads.json'), true);
+  assert.equal(isOfficialSource(null, 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads.json/'), true);
   assert.equal(isOfficialSource('My Custom Source', 'https://example.com/payloads.json'), false);
   assert.equal(isOfficialSource('Other Repository'), false);
   assert.equal(isOfficialSource(null, null), false);

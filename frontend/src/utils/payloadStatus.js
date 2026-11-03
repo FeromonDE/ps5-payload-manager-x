@@ -1,8 +1,8 @@
 import { compareVersions, slug } from './versions.js';
 import { isSystemPayload } from './helpers.js';
 
-export const OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/ps5-payloads-mirror/payloads_v2.json';
-export const LEGACY_OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/ps5-payloads-mirror/payloads.json';
+export const OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads_v2.json';
+export const LEGACY_OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads.json';
 
 export function isOfficialRepoUrl(url) {
   const norm = normalizeUrl(url);
