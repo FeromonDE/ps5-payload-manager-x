@@ -84,9 +84,9 @@
 #define REPOSITORY_CACHE_PATH PLDMGR_DATA_ROOT "/repository_cache.json"
 #define PAYLOADS_STORAGE_DIR PLDMGR_DATA_ROOT "/payloads"
 #define REPOSITORY_SOURCE_URL                                                  \
-  "https://bsk193.github.io/console-homebrew-hub/payloads_v2.json"
+  "https://bsk193.github.io/ps5-payloads-mirror/payloads_v2.json"
 #define LEGACY_REPOSITORY_SOURCE_URL                                           \
-  "https://bsk193.github.io/console-homebrew-hub/payloads.json"
+  "https://bsk193.github.io/ps5-payloads-mirror/payloads.json"
 #define REPOSITORY_REFRESH_INTERVAL_SEC 10800
 
 /* Logging (implementation in log_server.c) */

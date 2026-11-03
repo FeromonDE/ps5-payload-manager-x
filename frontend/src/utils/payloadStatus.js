@@ -1,8 +1,8 @@
 import { compareVersions, slug } from './versions.js';
 import { isSystemPayload } from './helpers.js';
 
-export const OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/console-homebrew-hub/payloads_v2.json';
-export const LEGACY_OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/console-homebrew-hub/payloads.json';
+export const OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/ps5-payloads-mirror/payloads_v2.json';
+export const LEGACY_OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/ps5-payloads-mirror/payloads.json';
 
 export function isOfficialRepoUrl(url) {
   const norm = normalizeUrl(url);
@@ -109,7 +109,6 @@ export function resolveSourceDisplayName(slot, sources = []) {
   //    upstream's legacy mirror hosts for back-compat)
   if (
     isOfficialRepoUrl(slot.source_url || slot.source_name) ||
-    normSlotUrl.includes('console-homebrew-hub') ||
     normSlotUrl.includes('ps5-payloads-mirror') ||
     normSlotUrl.includes('ps5-payloads.pages.dev')
   ) {
