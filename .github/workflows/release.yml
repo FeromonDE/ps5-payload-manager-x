@@ -29,6 +29,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # Build EXACTLY the tag we validate below. On a tag push github.ref is
+          # the tag; on manual dispatch, check out the requested tag (not the
+          # branch the workflow was dispatched from) so the built code matches
+          # the version we validate and publish.
+          ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
           submodules: recursive
 
