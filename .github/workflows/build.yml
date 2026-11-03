@@ -16,6 +16,10 @@ name: Build ELF (artifacts)
 
 on:
   workflow_dispatch:
+  # TEMPORARY during the 0.6.3 port — auto-build each stage on this branch.
+  # Remove this push trigger before merging merge/upstream-0.6.3 into main.
+  push:
+    branches: [merge/upstream-0.6.3]
 
 jobs:
   build:
