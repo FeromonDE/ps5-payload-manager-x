@@ -15,6 +15,7 @@
 #include "repository.h"
 #include "config.h"
 #include "pldmgr.h"
+#include "version_x.h"
 #include "autoload.h"
 #include "utils.h"
 #include "collection_helpers.h"
@@ -149,7 +150,13 @@ size_t payload_mgr_list_json(char *json_buf, size_t buf_size) {
     char update_path[1024], pending_version[64], pending_e[6 * 64];
     int pending = repository_check_self_update(update_path, sizeof(update_path), pending_version, sizeof(pending_version));
     json_escape_checked(&jb, pending ? pending_version : "", pending_e, sizeof(pending_e));
-    json_append(&jb, "{\n  \"self\":{\"id\":\"pldmgr\",\"running_version\":\"%s\",\"pending_version\":\"%s\"},\n", MENU_VERSION, pending_e);
+    /* Report the build's own self-update identity: fork id + fork version for the
+     * X build (PLDMGR_SELF_ID "pldmgrx", PLDMGR_RUNNING_VERSION = fork version),
+     * stock id + MENU_VERSION for stock. Using MENU_VERSION unconditionally made
+     * the X build report 0.6.3, so the frontend saw every fork catalog version as
+     * a (failing) update. */
+    json_append(&jb, "{\n  \"self\":{\"id\":\"%s\",\"running_version\":\"%s\",\"pending_version\":\"%s\"},\n",
+                PLDMGR_SELF_ID, PLDMGR_RUNNING_VERSION, pending_e);
     json_append(&jb, "  \"items\": [\n");
 
     for (size_t i = 0; i < slot_count; i++) {
