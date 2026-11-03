@@ -75,6 +75,13 @@ int main(int argc, char *argv[]) {
 
     syscall(SYS_thr_set_name, -1, PLDMGR_PROC_NAME);
 
+    /* X->X self-update scans installed ELFs for the "<marker><version>" build
+     * signature (pldmgr_version_sig). The 0.6.3 port stopped reading it, so
+     * --gc-sections dropped it from the ELF and self-update silently broke.
+     * Log it at startup: a genuine use whose pointer escapes to an external
+     * function, forcing the linker to keep the symbol. */
+    pldmgr_log("[PLDMGR] Build signature: %s\n", (const char *)pldmgr_version_sig);
+
     while ((pid = process_find_pid(PLDMGR_PROC_NAME)) > 0) {
         if (kill(pid, SIGKILL)) {
             pldmgr_log("[PLDMGR] kill failed for pid %d\n", pid);

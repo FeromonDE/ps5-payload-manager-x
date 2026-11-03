@@ -64,6 +64,12 @@ ifdef PLDMGRX
 CFLAGS += -DPLDMGRX -DMENU_PORT_OVERRIDE=$(PLDMGRX_PORT)
 ELF := pldmgrx_$(PLDMGRX_PORT).elf
 PARAM_X := assets/param_x.json
+# X->X self-update scans ELFs for this "PLDMGRX_VER:<version>" signature; if
+# --gc-sections ever drops it again, fail the build instead of shipping a broken
+# self-update (regression guard for the x-v1.1.0 bug).
+SIG_CHECK = strings "$(ELF)" | grep -qF "PLDMGRX_VER:$(X_VERSION)" || { echo "ERROR: self-update signature 'PLDMGRX_VER:$(X_VERSION)' missing from $(ELF) (gc-sections dropped it?)"; exit 1; }
+else
+SIG_CHECK = :
 endif
 
 all: $(ELF)
@@ -154,6 +160,7 @@ $(FRONTEND_DIST):
 $(ELF): $(ASSET_HEADER) $(MANIFEST_HEADER) $(CA_HEADER) $(FAVICON_SVG_HEADER) $(ICON_PNG_HEADER) $(PARAM_X) $(SRCS)
 	@echo "Building $(ELF)..."
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $(ELF) $(SRCS) $(LIBS)
+	@$(SIG_CHECK)
 	@echo "Stripping $(ELF)..."
 	$(STRIP) $(ELF)
 
