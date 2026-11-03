@@ -1,37 +1,13 @@
 #include <stdio.h>
 #include <string.h>
-#include <stdint.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <netdb.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include "utils.h"
-
-/* Best-effort console firmware read. Declared weak so that if the symbol is not
- * available at link time it resolves to NULL instead of failing the build; we
- * then simply report "unknown" and the UI degrades to display-only. The version
- * value is BCD-encoded per byte (e.g. 0x07610000 -> "7.61", 0x10200000 -> "10.20").
- * NOTE: needs on-hardware verification of the exact struct/encoding. */
-struct pldmgr_sw_version { size_t size; char str[0x24]; uint32_t value; };
-extern int sceKernelGetSystemSwVersion(struct pldmgr_sw_version *) __attribute__((weak));
-
-int pldmgr_get_system_fw(char *out, size_t out_size) {
-    if (out && out_size) out[0] = '\0';
-    if (!out || out_size < 8) return -1;
-    if (!sceKernelGetSystemSwVersion) return -1; /* symbol absent -> degrade */
-
-    struct pldmgr_sw_version v;
-    memset(&v, 0, sizeof(v));
-    v.size = sizeof(v);
-    if (sceKernelGetSystemSwVersion(&v) != 0) return -1;
-
-    unsigned maj = (v.value >> 24) & 0xFF;
-    unsigned min = (v.value >> 16) & 0xFF;
-    /* Each byte is BCD (nibble-per-digit): format in hex to reproduce the digits. */
-    snprintf(out, out_size, "%x.%02x", maj, min);
-    return 0;
-}
+#include "pldmgr.h"
 
 int pldmgr_get_local_ip(char *ip_buf, size_t buf_size) {
     struct ifaddrs *ifaddr, *ifa;
@@ -100,21 +76,102 @@ void pldmgr_utils_get_payload_folder_name(const char *filename, char *out_buf, s
     out_buf[out_size - 1] = '\0';
 }
 
-void pldmgr_json_escape(const char *src, char *dst, size_t dst_size) {
-    size_t pos = 0;
-    if (dst_size == 0) {
-        return;
-    }
-
-    for (size_t i = 0; src[i] != '\0' && pos + 1 < dst_size; i++) {
-        unsigned char c = (unsigned char)src[i];
-        if ((c == '"' || c == '\\') && pos + 2 < dst_size) {
-            dst[pos++] = '\\';
-            dst[pos++] = (char)c;
-        } else if (c >= 0x20 && c <= 0x7E) {
-            dst[pos++] = (char)c;
-        }
-    }
-
-    dst[pos] = '\0';
+/* Validate one Unicode scalar, rejecting overlong forms, surrogate code points,
+ * incomplete sequences, and values beyond U+10FFFF. */
+static size_t utf8_scalar_size(const unsigned char *s, size_t remaining) {
+    size_t n;
+    if (s[0] < 0x80) return 1;
+    if (s[0] >= 0xc2 && s[0] <= 0xdf) n = 2;
+    else if (s[0] >= 0xe0 && s[0] <= 0xef) n = 3;
+    else if (s[0] >= 0xf0 && s[0] <= 0xf4) n = 4;
+    else return 0;
+    if (remaining < n) return 0;
+    for (size_t i = 1; i < n; i++)
+        if (s[i] < 0x80 || s[i] > 0xbf) return 0;
+    if ((s[0] == 0xe0 && s[1] < 0xa0) ||
+        (s[0] == 0xed && s[1] >= 0xa0) ||
+        (s[0] == 0xf0 && s[1] < 0x90) ||
+        (s[0] == 0xf4 && s[1] > 0x8f)) return 0;
+    return n;
 }
+
+int pldmgr_json_escape(const char *src, char *dst, size_t dst_size) {
+    size_t pos = 0;
+    if (!dst || dst_size == 0) return -1;
+    dst[0] = '\0';
+    if (!src) return -1;
+    size_t size = strlen(src);
+
+    for (size_t i = 0; i < size;) {
+        unsigned char c = (unsigned char)src[i];
+        const char *part = src + i;
+        size_t consumed = 1, length = 1;
+        char escaped[7];
+        if (c == '"' || c == '\\') {
+            escaped[0] = '\\';
+            escaped[1] = (char)c;
+            part = escaped;
+            length = 2;
+        } else if (c < 0x20) {
+            char short_escape = 0;
+            switch (c) {
+                case '\b': short_escape = 'b'; break;
+                case '\f': short_escape = 'f'; break;
+                case '\n': short_escape = 'n'; break;
+                case '\r': short_escape = 'r'; break;
+                case '\t': short_escape = 't'; break;
+            }
+            if (short_escape) {
+                escaped[0] = '\\';
+                escaped[1] = short_escape;
+                length = 2;
+            } else {
+                static const char hex[] = "0123456789abcdef";
+                memcpy(escaped, "\\u00", 4);
+                escaped[4] = hex[c >> 4];
+                escaped[5] = hex[c & 15];
+                length = 6;
+            }
+            part = escaped;
+        } else if (c >= 0x80) {
+            length = utf8_scalar_size((const unsigned char *)src + i, size - i);
+            if (length) consumed = length;
+            else {
+                part = "\\ufffd";
+                length = 6;
+            }
+        }
+        if (length >= dst_size - pos) return -1;
+        memcpy(dst + pos, part, length);
+        pos += length;
+        dst[pos] = '\0';
+        i += consumed;
+    }
+    return 0;
+}
+
+int is_pldmgr_name(const char *name) {
+    if (!name || !*name) return 0;
+    const char *base = strrchr(name, '/');
+    base = base ? base + 1 : name;
+    return (strncasecmp(base, "pldmgr", 6) == 0 ||
+            strncasecmp(base, "payload-manager", 15) == 0 ||
+            strncasecmp(base, "payload_manager", 15) == 0 ||
+            strncasecmp(base, "payload manager", 15) == 0 ||
+            strncasecmp(base, "payloadmanager", 14) == 0);
+}
+
+int is_pldmgr_official_source(const char *url) {
+    if (!url) return 0;
+    size_t n = strlen(url);
+    while (n && url[n - 1] == '/') n--;
+    return n == strlen(REPOSITORY_SOURCE_URL) && !strncmp(url, REPOSITORY_SOURCE_URL, n);
+}
+
+int is_legacy_official_repo_url(const char *url) {
+    if (!url) return 0;
+    size_t n = strlen(url);
+    while (n && url[n - 1] == '/') n--;
+    return n == strlen(LEGACY_REPOSITORY_SOURCE_URL) && !strncmp(url, LEGACY_REPOSITORY_SOURCE_URL, n);
+}
+

@@ -1,39 +1,80 @@
-import React from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import { Zap, Usb } from 'lucide-react'
-import { cn, parsePayloadName } from '../../utils/helpers'
+import { cn, parsePayloadName, cleanDisplayName } from '../../utils/helpers'
 import { useTranslation } from 'react-i18next'
 
-const PayloadName = ({ path, name, version: repoVersion, className, versionClassName, stacked = false, hideIcon = false, lastUpdate = null, minFw = null, maxFw = null, fwIncompatible = false }) => {
+const PayloadName = ({ path = '', version: repoVersion, className, versionClassName, stacked = false, hideIcon = false, lastUpdate = null, hideVersion = false, centered = false, displayName: metaDisplayName = null }) => {
   const { t } = useTranslation();
-  let { displayName, version, isDelay, delaySeconds } = parsePayloadName(path);
-  const isUsb = path?.startsWith('/mnt/usb');
+  const safePath = typeof path === 'string' ? path : '';
+  let { displayName, version, isDelay, delaySeconds } = parsePayloadName(safePath);
+  const isUsb = Boolean(safePath && safePath.startsWith('/mnt/usb'));
+
+  if (metaDisplayName) displayName = metaDisplayName;
+
+  const activeVersion = repoVersion || version;
+  if (displayName && activeVersion) {
+    displayName = cleanDisplayName(displayName, activeVersion);
+  }
 
   if (repoVersion) version = repoVersion;
-  // Prefer the repository "name" field when it's a real display name (not just a
-  // filename). Payloads without metadata (USB / manual uploads whose stored name
-  // is the filename) fall back to the cleaned filename.
-  if (name && !isDelay && !/\.(elf|bin)$/i.test(name)) {
-    displayName = name;
-  }
+  if (hideVersion) version = null;
   if (isDelay) {
     displayName = t("autoload.delay_item", "Delay ({{seconds}}s)", { seconds: delaySeconds || 1 });
   }
 
-  // Compose a compact firmware-range label from min/max FW.
-  const fwLabel = (minFw && maxFw) ? `FW ${minFw}–${maxFw}`
-    : minFw ? `FW ≥ ${minFw}`
-    : maxFw ? `FW ≤ ${maxFw}`
-    : null;
+  const containerRef = useRef(null);
+  const textRef = useRef(null);
+  const [scrollAmount, setScrollAmount] = useState(0);
+
+  useEffect(() => {
+    const checkOverflow = () => {
+      if (containerRef.current && textRef.current) {
+        const overflow = textRef.current.scrollWidth - containerRef.current.clientWidth;
+        setScrollAmount(overflow > 0 ? overflow : 0);
+      }
+    };
+    
+    // Check initially and on resize
+    checkOverflow();
+    window.addEventListener('resize', checkOverflow);
+    return () => window.removeEventListener('resize', checkOverflow);
+  }, [displayName]);
 
   return (
     <div className={cn("flex min-w-0 flex-1 w-full", stacked ? "flex-col items-stretch" : "items-center space-x-3", className)}>
-      <div className="flex items-center space-x-2 min-w-0">
+      <div className="flex items-center space-x-2 min-w-0 flex-1">
         {isDelay && !hideIcon && <Zap className="w-4 h-4 text-ps-blue shrink-0" />}
         {isUsb && !hideIcon && <Usb className="w-5 h-5 text-ps-blue shrink-0 mr-1" />}
-        <span className="font-bold truncate shrink leading-tight">{displayName}</span>
+        <div 
+          className="overflow-hidden min-w-0 flex-1 relative" 
+          ref={containerRef}
+        >
+          {/* Static truncated text with ellipsis */}
+          <div 
+             className={cn(
+               "truncate font-bold leading-tight transition-opacity",
+               centered ? "text-center" : "text-left",
+               scrollAmount > 0 ? "group-hover:opacity-0 group-focus-within:opacity-0" : ""
+             )}
+          >
+            {displayName}
+          </div>
+          
+          {/* Scrolling text overlay (only visible on hover/focus if overflowing) */}
+          <div 
+            ref={textRef}
+            className={cn(
+              "absolute top-0 left-0 font-bold text-left leading-tight whitespace-nowrap inline-block transition-opacity",
+              scrollAmount > 0 ? "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 animate-marquee" : "opacity-0 pointer-events-none"
+            )}
+            style={{ '--scroll-amount': `${scrollAmount}px` }}
+          >
+            {displayName}
+          </div>
+        </div>
       </div>
-      {(version || lastUpdate || fwLabel) && (
-        <div className={cn("flex items-center flex-wrap gap-y-1", stacked ? "mt-1" : "")}>
+      {(version || lastUpdate) && (
+        <div className={cn("flex items-center", stacked ? "mt-1" : "")}>
           {version && (
             <span className={cn(
               stacked
@@ -43,21 +84,7 @@ const PayloadName = ({ path, name, version: repoVersion, className, versionClass
               {version}
             </span>
           )}
-          {version && (lastUpdate || fwLabel) && (
-            <span className="text-[11px] text-zinc-600 mx-2">•</span>
-          )}
-          {fwLabel && (
-            <span className={cn(
-              "font-bold tracking-wider shrink-0",
-              stacked ? "text-[11px]" : "text-[10px] px-2 py-0.5 rounded-md border",
-              fwIncompatible
-                ? (stacked ? "text-red-400" : "text-red-400 bg-red-500/10 border-red-500/30")
-                : (stacked ? "text-amber-400/90" : "text-amber-400 bg-amber-500/10 border-amber-500/30")
-            )}>
-              {fwLabel}
-            </span>
-          )}
-          {fwLabel && lastUpdate && (
+          {version && lastUpdate && (
             <span className="text-[11px] text-zinc-600 mx-2">•</span>
           )}
           {lastUpdate && (

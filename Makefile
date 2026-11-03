@@ -2,6 +2,7 @@
 
 # Tools
 PYTHON := python3
+HOST_CC ?= clang
 CC     := /opt/ps5-payload-sdk/bin/prospero-clang
 STRIP  := /opt/ps5-payload-sdk/bin/prospero-strip
 
@@ -21,9 +22,9 @@ LIBS     := $(TARGET)/lib/libcurl.a \
 # Source Files
 SRCS := src/main.c src/http_server.c src/config.c src/log_server.c \
         src/sha256.c src/json_helpers.c src/repository.c src/sources.c \
-        src/profiles.c src/payload_mgr.c src/process_mgr.c \
+        src/payload_mgr.c src/process_mgr.c src/profiles.c \
         src/ps5_launcher.c src/notification.c src/utils.c src/autoload.c \
-        src/app_installer.c src/history_mgr.c
+        src/app_installer.c src/history_mgr.c src/slot.c
 OBJS := $(SRCS:.c=.o)
 ELF  := pldmgr.elf
 
@@ -44,17 +45,17 @@ CFLAGS := -Os -Wall -ffunction-sections -fdata-sections $(INCLUDES)
 LDFLAGS := -Wl,--gc-sections
 
 # Fork (Payload Manager X) version — our own semver, independent of upstream's
-# MENU_VERSION. Comes from git tags via tools/fork_version.sh (git describe of
-# x-v* tags; 0.0.0-dev when untagged). Override with `make X_VERSION=1.2.3`
-# (the release workflow passes the exact tagged version).
+# MENU_VERSION. From git tags via tools/fork_version.sh (git describe of x-v*
+# tags; 0.0.0-dev when untagged). Override with `make X_VERSION=1.2.3` (the
+# release workflow passes the exact tagged version).
 X_VERSION ?= $(shell bash tools/fork_version.sh dev 2>/dev/null)
 ifneq ($(X_VERSION),)
 CFLAGS += -DPLDMGRX_VERSION=\"$(X_VERSION)\"
 endif
 
 # "Payload Manager X" build: `make ... PLDMGRX=1 [PLDMGRX_PORT=8084|8184]`.
-# Always uses the X identity (name "Payload Manager X", app id PLDMGRX01,
-# /data/pldmgrx) — the only thing that varies is the HTTP port:
+# Uses the X identity (name "Payload Manager X", app id PLDM00002, /data/pldmgrx,
+# "PLDMGRX_VER:" self signature). Only the HTTP port varies:
 #   PLDMGRX_PORT=8084 -> pldmgrx_8084.elf : drop-in replacement for official
 #   PLDMGRX_PORT=8184 -> pldmgrx_8184.elf : runs alongside the official manager
 PLDMGRX_PORT ?= 8084
@@ -71,6 +72,34 @@ all: $(ELF)
 assets/param_x.json: assets/param_x.json.in
 	@echo "Generating $@ for port $(PLDMGRX_PORT)..."
 	sed 's/__PORT__/$(PLDMGRX_PORT)/g' $< > $@
+
+# These tests execute the HTTP handler on the host with PS5 services stubbed.
+# See DEVELOPMENT.md for the isolated container option and native build gate.
+.PHONY: test-host test-frontend test
+test-host:
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_json_escape_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_json_decode_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_json_backend_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_json_size_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_allocation_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_integrity_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_repository_icons_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_self_update_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_storage_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_autoload_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_launcher_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_process_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_log_stream_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_config_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_http_tests.py --autoload-only
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_http_tests.py --logs-only
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_http_tests.py --config-only
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_http_tests.py
+
+test-frontend:
+	cd frontend && npm run lint && npm test
+
+test: test-host test-frontend
 
 # Build the React frontend
 .PHONY: frontend-build

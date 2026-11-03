@@ -26,9 +26,12 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const lastSyncedRef = React.useRef('')
 
-  // Sync in from props (App owns the canonical copy for the startup picker)
+  // Sync in from props (App owns the canonical copy for the startup picker). This
+  // one-time-per-change prop->state mirror is gated on [incomingProfiles], so the
+  // set-state-in-effect it performs is intentional, not a cascading render.
   useEffect(() => {
     if (Array.isArray(incomingProfiles)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setProfiles(incomingProfiles.map(p => ({ ...p, list: [...p.list] })))
       lastSyncedRef.current = serialize(incomingProfiles)
       setIsInitialized(true)
@@ -129,7 +132,7 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
 
   const removeAt = (index) => updateEditing(pr => ({ ...pr, list: pr.list.filter((_, i) => i !== index) }))
 
-  const SaveIndicator = () => (
+  const saveIndicator = (
     <div className="h-6 overflow-hidden">
       {saving ? (
         <div className="flex items-center space-x-2 text-ps-blue/60 text-xs font-bold uppercase tracking-widest">
@@ -218,7 +221,7 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
           <h2 className="text-3xl font-extrabold text-white tracking-tight truncate">
             {t("autoload.sequence_title_1", "Autoload")} <span className="text-ps-blue">{t("autoload.sequence_title_2", "Sequence")}</span>
           </h2>
-          <SaveIndicator />
+          {saveIndicator}
         </div>
         <button
           onClick={() => toggleActive(editing.id)}
@@ -358,7 +361,7 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
           <h2 className="text-4xl font-extrabold text-white tracking-tight">
             {t("profiles.title_1", "Autoload")} <span className="text-ps-blue">{t("profiles.title_2", "Profiles")}</span>
           </h2>
-          <SaveIndicator />
+          {saveIndicator}
         </div>
         <button
           onClick={createProfile}

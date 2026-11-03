@@ -1,15 +1,25 @@
 import { clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
-export const isPS5 = /PlayStation/i.test(navigator.userAgent);
-export const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+export const isPS5 = typeof navigator !== 'undefined' && /PlayStation/i.test(navigator.userAgent);
+export const isIOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 
 export function cn(...inputs) {
   return twMerge(clsx(inputs))
 }
 
+export const getBaseName = (filename) => {
+  if (!filename || typeof filename !== 'string') return '';
+  let clean = filename.split('/').pop().replace(/\.(elf|bin)$/i, '');
+  const versionMatch = clean.match(/[_\s.-]v?(\d+[\d.a-z-]*)/i);
+  if (versionMatch) {
+    clean = clean.replace(versionMatch[0], '');
+  }
+  return clean.replace(/[_\s.-]ps[45]$/i, '').toLowerCase().trim();
+};
+
 export const parsePayloadName = (path) => {
-  if (!path) return { displayName: '', version: null };
+  if (!path || typeof path !== 'string') return { displayName: '', version: null, isDelay: false };
   if (path.startsWith('!')) {
     const ms = parseInt(path.substring(1));
     return { displayName: `Delay (${ms / 1000}s)`, version: null, isDelay: true, delaySeconds: ms / 1000 };
@@ -17,8 +27,8 @@ export const parsePayloadName = (path) => {
 
   let name = path.split('/').pop().replace(/\.(elf|bin)$/i, '');
 
-  // Try to find version pattern like _v1.0 or -v1.0 or _1.0
-  const versionMatch = name.match(/[_-](v?\d+[\d.a-z-]+)/i);
+  // Try to find version pattern like _v1.0, -v1.0, _1.0, .v1.0, or space separated
+  const versionMatch = name.match(/[_\s.-](v?\d+[\d.a-z-]*)/i);
   let version = null;
 
   if (versionMatch) {
@@ -26,17 +36,30 @@ export const parsePayloadName = (path) => {
     name = name.replace(versionMatch[0], '');
   }
 
+  name = name.replace(/[_\s.-]ps[45]$/i, '');
+
   return {
-    displayName: name.replace(/_/g, ' ').replace(/-/g, ' '),
+    displayName: name.replace(/_/g, ' ').replace(/-/g, ' ').trim(),
     version: version,
     isDelay: false
   };
 };
 
-// Version-stripped identity of a payload, mirroring the C
-// pldmgr_utils_get_payload_folder_name(): strip extension, a _v/-v (or _/- + digit)
-// version marker, and any -ps4/-ps5 suffix. Used to prevent launching/adding two
-// versions of the same payload.
+export const isSystemPayload = (filename) => {
+  if (!filename || typeof filename !== 'string') return false;
+  const name = filename.split('/').pop().toLowerCase();
+  return (
+    name.startsWith('pldmgr') ||
+    name.includes('payload-manager') ||
+    name.includes('payload_manager') ||
+    name.includes('payload manager') ||
+    name.includes('payloadmanager') ||
+    name === 'pldmgr'
+  );
+};
+
+/* Fork: base identity of a payload (strip path, extension, version/platform
+ * suffix) so autoload profiles dedup different versions of the same payload. */
 export const payloadBaseName = (filename) => {
   if (!filename) return '';
   let clean = filename.split('/').pop();
@@ -53,32 +76,12 @@ export const payloadBaseName = (filename) => {
   clean = clean.replace(/[_-]ps[45].*$/i, '');
   return clean.toLowerCase();
 };
-
-// Compare two version strings numerically, part by part, so "1.10" > "1.6.7"
-// (parseFloat would wrongly give 1.1 < 1.6). Leading "v" is ignored; parts split
-// on . - _ and non-numeric suffixes (e.g. "b17", "-dr-test1") are dropped.
-// Returns >0 if a is newer, <0 if older, 0 if equal/unknown.
-export const compareVersions = (a, b) => {
-  const parts = (v) => String(v || '').replace(/^v/i, '').split(/[.\-_]/)
-    .map(s => parseInt(s, 10)).filter(n => !isNaN(n));
-  const pa = parts(a), pb = parts(b);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const x = pa[i] || 0, y = pb[i] || 0;
-    if (x !== y) return x - y;
-  }
-  return 0;
-};
-
-// Parse a firmware string like "7.61" or "10.20" to a comparable number.
 export const parseFw = (s) => {
   if (!s) return null;
   const n = parseFloat(String(s).replace(/[^0-9.]/g, ''));
   return isNaN(n) ? null : n;
 };
-
-// True if the console FW falls within [minFw, maxFw]. When the console FW is
-// unknown (null/empty), returns true so nothing is grayed out (display-only).
+/* Fork: firmware compatibility. Empty consoleFw => always compatible. */
 export const fwCompatible = (minFw, maxFw, consoleFw) => {
   const c = parseFw(consoleFw);
   if (c === null) return true;
@@ -88,20 +91,32 @@ export const fwCompatible = (minFw, maxFw, consoleFw) => {
   return true;
 };
 
-// Is a repo entry an experimental / pre-release build? Prefers the explicit
-// `channel` ("stable" vs anything else) or `prerelease: true` field from the
-// repo JSON; falls back to common pre-release markers in the version string
-// (e.g. "-dr", "-beta", "-rc1", "-test1") for sources that omit the field.
-export const isExperimentalVersion = (entry) => {
-  if (!entry) return false;
-  if (entry.channel) return String(entry.channel).toLowerCase() !== 'stable';
-  if (entry.prerelease === true) return true;
-  const v = entry.version || (entry.filename ? parsePayloadName(entry.filename).version : '') || '';
-  return /(?:^|[-_.])(?:dr|rc|beta|alpha|exp|experimental|test|dev|nightly|pre|snapshot)\d*(?:$|[-_.])/i.test(String(v));
+export const formatVersionTag = (version, maxLen = 8) => {
+  if (!version || typeof version !== 'string') return '';
+  const trimmed = version.trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  const keepCount = Math.max(1, maxLen - 2);
+  return `...${trimmed.slice(-keepCount)}`;
 };
 
-export const isSystemPayload = (filename) => {
-  if (!filename) return false;
-  const name = filename.split('/').pop().toLowerCase();
-  return name.startsWith('pldmgr') || name.includes('payload-manager');
+export const formatSourceTag = (sourceName, maxLen = 20) => {
+  if (!sourceName || typeof sourceName !== 'string') return '';
+  const trimmed = sourceName.trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  return `${trimmed.slice(0, maxLen - 3)}...`;
+};
+
+export const cleanDisplayName = (name, version) => {
+  if (!name || typeof name !== 'string') return '';
+  let cleaned = name.trim();
+  if (version) {
+    try {
+      const bareVer = String(version).replace(/^v/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const verSuffixRegex = new RegExp(`[\\s_\\.-]+v?${bareVer}$`, 'i');
+      cleaned = cleaned.replace(verSuffixRegex, '').trim();
+    } catch {
+      /* ignore regex error if any */
+    }
+  }
+  return cleaned;
 };

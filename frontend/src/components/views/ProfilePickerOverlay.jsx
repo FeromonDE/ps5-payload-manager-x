@@ -8,7 +8,7 @@ import PayloadName from '../ui/PayloadName'
  * Shown at startup when autoload is in "picker" mode: profiles exist but none is
  * enabled. The user selects one to run immediately, or skips to the dashboard.
  */
-const ProfilePickerOverlay = ({ profiles, onRun, onSkip, isPS5 }) => {
+const ProfilePickerOverlay = ({ profiles, onRun, onSkip }) => {
   const { t } = useTranslation()
   const [runningId, setRunningId] = useState(null)
 

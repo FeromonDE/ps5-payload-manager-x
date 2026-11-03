@@ -1,15 +1,59 @@
-## v0.5.0-x
+## v0.6.3
+
+### 🛠️ Bug Fixes
+* Hotfix for v0.6.2: fixed emojis not appearing on PS5.
+
+**Full Changelog**: [v0.6.2...v0.6.3](https://github.com/itsPLK/ps5-payload-manager/compare/v0.6.2...v0.6.3)
+
+## v0.6.2
 
 ### 🚀 Features & UX Improvements
-* **Autoload Profiles**: The single autoload sequence is now split into multiple named **profiles**. Enable one profile to have it auto-run on startup (with the existing countdown/abort overlay), or leave all profiles disabled to get a **startup selection screen** where you pick a profile to run immediately. Enabling a profile automatically disables the previously enabled one (single active profile). Existing `autoload.txt` sequences are migrated into a "Default" profile on first launch.
+* **Autoload Return to Dashboard**: Added an optional **Return After Autoload** setting, disabled by default, to return to the dashboard about 3 seconds after all payloads load successfully. Results stay visible if any payload fails or is skipped ([#123](https://github.com/itsPLK/ps5-payload-manager/issues/123)).
+* **Dashboard Icon Setting**: Added an option to hide payload icons on the dashboard, leaving more space for text while keeping card sizes unchanged. Icons remain visible in **Get Payloads** ([#131](https://github.com/itsPLK/ps5-payload-manager/issues/131)).
+* **Release Details**: Added a collapsible **Release details** section above the README on payload details pages. Release notes are fetched directly from GitHub for the release tag or version offered by the payload catalog ([#133](https://github.com/itsPLK/ps5-payload-manager/issues/133)).
+* **New Languages**:
+  * **Traditional Chinese**
+  * **Romanian**
 
-### 🛠️ Backend & API Updates
-* Profiles are stored in `profiles.json` and managed via new `/profiles_get`, `/profiles_set`, and `/profile_run` endpoints. `/autoload_status` now reports a `picker` flag. `autoload.txt` becomes an internal scratch file resolved from the active/selected profile.
+### 🛠️ Performance & Bug Fixes
+* **Smaller ELF**: Replaced bundled emoji artwork with Twemoji images loaded from a version-pinned public CDN, reducing the payload size. Downloaded emoji are cached for offline reuse ([#130](https://github.com/itsPLK/ps5-payload-manager/issues/130)).
+* **Mobile Upload Controls**: Fixed the upload button appearing outside the visible area in portrait mode. Repository controls now wrap to fit narrow screens, including when search is open ([#126](https://github.com/itsPLK/ps5-payload-manager/issues/126)).
+* **Payload Icon Caching**: Payload icons and catalog metadata now persist across browser sessions, so cached icons appear immediately when reopening the app instead of waiting for a catalog refresh.
 
-## v0.5.2 (upstream)
+**Full Changelog**: [v0.6.1...v0.6.2](https://github.com/itsPLK/ps5-payload-manager/compare/v0.6.1...v0.6.2)
+
+## v0.6.1
+
+### 🛠️ Backend & Bug Fixes
+- Restored automatic Disc Player termination on startup for BD-JB users, which was removed in v0.6.0.  
+This is still useful for users on older BD-JB autoloader builds (lower than v1.4.0).
+
+**Full Changelog**: [v0.6.0...v0.6.1](https://github.com/itsPLK/ps5-payload-manager/compare/v0.6.0...v0.6.1)
+
+## v0.6.0
+
+### 🚀 Features & UX Improvements
+* **Repository Browser Overhaul**: Rebuilt **Get Payloads** into a full store experience with a card grid, search, source filtering, and live install status badges.
+* **Payload Details**: Added a dedicated details page showing payload README documentation and version info.
+* **Cross-Browser Favorites**: Dashboard favorites are now stored on the console, keeping your favorites and custom order synced across all browsers and devices.
+* **Controller & History Navigation**: Pressing Back / Circle on your PS5 controller or browser now closes modals, details, and edit modes instead of exiting the browser. Added URL links for direct navigation.
+* **UI Polish & Quality of Life**: Refreshed Autoload screen styling with improved auto-saving, redesigned payload launch overlay, support for custom repository payload icons and source badges, and cleaner notification toasts.
+* **New Language**:
+  * **Dutch** (thanks to JensJ56)
+* **Translations**: Updated localization files across all 17 supported languages.
+
+### 🛠️ Backend & Bug Fixes
+* **Autoload Network Resilience**: Fixed repository network timeouts on boot delaying the autoload sequence ([#109](https://github.com/itsPLK/ps5-payload-manager/pull/109), thanks to [kianborg](https://github.com/kianborg)).
+* **Fresh PS5 Install Fix**: Fixed installer failing on brand new PS5 systems ([#108](https://github.com/itsPLK/ps5-payload-manager/issues/108)).
+* **Security & Verification**: Added checksum verification for repository downloads and restricted actions to POST requests with origin validation.
+* **Stability Improvements**: Resolved crashes with large repository catalogs, improved memory handling, fixed connection cleanup, and other minor stability improvements and bug fixes.
+
+**Full Changelog**: [v0.5.2...v0.6.0](https://github.com/itsPLK/ps5-payload-manager/compare/v0.5.2...v0.6.0)
+
+## v0.5.2
 - Rebuilt with latest SDK
 
-## v0.5.1 (upstream)
+## v0.5.1
 
 ### 🚀 Features & UX Improvements
 * **Translations**: Updated localization files across supported languages.

@@ -1,32 +1,31 @@
 #pragma once
 
 /* ── Build identity ────────────────────────────────────────────
- * Define PLDMGRX (e.g. `make ... PLDMGRX=1`, which passes -DPLDMGRX) to build
- * "Payload Manager X": a second instance that can be installed and run next to
- * a stock Payload Manager without colliding. It uses a different HTTP port,
- * home-screen app id/name, and data directory (/data/pldmgrx), so the two never
- * share config, profiles, or the autoload scratch file.
- * Without the flag, the build is identical to stock. */
+ * Define PLDMGRX (e.g. `make ... PLDMGRX=1`) to build "Payload Manager X": a
+ * second instance that installs and runs next to a stock Payload Manager without
+ * colliding — its own HTTP port, home-screen app id/name, data dir
+ * (/data/pldmgrx), self-update signature and process name. Without the flag the
+ * build is identical to stock. */
 #ifdef PLDMGRX
-  /* Port is chosen at build time (make ... PLDMGRX_PORT=8084|8184). 8084 makes a
-   * drop-in replacement for the official manager; 8184 runs alongside it. */
+  /* Port chosen at build time (make ... PLDMGRX_PORT=8084|8184). 8084 = drop-in
+   * replacement for the official manager; 8184 = runs alongside it. */
   #ifdef MENU_PORT_OVERRIDE
     #define MENU_PORT MENU_PORT_OVERRIDE
   #else
     #define MENU_PORT 8084
   #endif
   #define PLDMGR_DATA_ROOT "/data/pldmgrx"
-  /* PS5 title IDs must be 4 uppercase letters + 5 digits (like the official
-   * PLDM00001). A malformed id (e.g. PLDMGRX01) is rejected and no app tile is
-   * created. PLDM00002 keeps the proven prefix but a distinct number. */
+  /* PS5 title ids are 4 uppercase letters + 5 digits; PLDM00002 keeps the proven
+   * prefix with a distinct number so the X app tile is separate from stock. */
   #define PLDMGR_TITLE_ID  "PLDM00002"
   #define PLDMGR_APP_NAME  "Payload Manager X"
   /* Distinct from stock so the two never mistake each other for "self": the X
-   * build embeds/scans a "PLDMGRX_VER:" signature (stock uses "PLDMGR_VER:") and
-   * names its thread "pldmgrx.elf" (stock uses "pldmgr.elf"), so self-update
-   * won't launch stock pldmgr and the two won't SIGKILL each other. */
+   * build embeds/scans a "PLDMGRX_VER:" signature and names its thread
+   * "pldmgrx.elf", so self-update won't launch stock pldmgr and they won't
+   * SIGKILL each other. */
   #define PLDMGR_SELF_MARKER "PLDMGRX_VER:"
   #define PLDMGR_PROC_NAME   "pldmgrx.elf"
+  #define PLDMGR_SELF_ID     "pldmgrx"
 #else
   #define MENU_PORT        8084
   #define PLDMGR_DATA_ROOT "/data/pldmgr"
@@ -34,6 +33,7 @@
   #define PLDMGR_APP_NAME  "Payload Manager"
   #define PLDMGR_SELF_MARKER "PLDMGR_VER:"
   #define PLDMGR_PROC_NAME   "pldmgr.elf"
+  #define PLDMGR_SELF_ID     "pldmgr"
 #endif
 
 /* Network Settings */
@@ -56,17 +56,20 @@
 #define ROUTE_ABORT "/abort"
 #define ROUTE_AUTOLOAD_STATUS "/autoload_status"
 #define ROUTE_AUTOLOAD_CLEAR "/autoload_clear"
+/* Fork: autoload profiles + always-run startup payloads. */
 #define ROUTE_PROFILES_GET "/profiles_get"
 #define ROUTE_PROFILES_SET "/profiles_set"
-#define ROUTE_PROFILE_RUN "/profile_run"
-#define ROUTE_STARTUP_GET "/startup_get"
-#define ROUTE_STARTUP_TOGGLE "/startup_toggle"
-#define ROUTE_SYSTEM_INFO "/system_info"
+#define ROUTE_PROFILE_RUN  "/profile_run"
+#define ROUTE_STARTUP_GET  "/startup_get"
+#define ROUTE_STARTUP_SET  "/startup_set"
+/* Fork: files installed to /data/homebrew (".exfat" homebrew), for UI state. */
+#define ROUTE_HOMEBREW_LIST "/homebrew_list"
+#define ROUTE_REPO_ICONS "/repository_icons"
+#define ROUTE_REPO_CACHE_CLEAR "/repository_cache_clear"
 #define ROUTE_REPO_LIST "/repository_payloads"
 #define ROUTE_REPO_REFRESH "/repository_refresh"
 #define ROUTE_REPO_INSTALL "/repository_install"
-#define ROUTE_REPO_PUSH "/repository_push"
-#define ROUTE_REPO_INSTALL_PUSH "/repository_install_push"
+#define ROUTE_UPDATE_CHECK "/update_check"
 #define ROUTE_SOURCES_LIST "/sources_list"
 #define ROUTE_SOURCES_SET "/sources_set"
 #define ROUTE_SOURCES_ADD "/sources_add"
@@ -79,23 +82,32 @@
 #define ROUTE_PROCESS_KILL "/process_kill"
 #define ROUTE_HISTORY_LIST "/history_list"
 
-/* Upstream's version. The fork NEVER edits this line, so merging upstream never
- * conflicts here. The fork's own version lives in include/version_x.h
- * (PLDMGRX_VERSION), set from git tags; MENU_VERSION is shown as "based on vX". */
-#define MENU_VERSION "0.5.2"
-/* autoload.txt is the persistent "startup payloads" list (always run on boot,
- * pldmgr-style, toggled per-payload in Manage Payloads). The active/selected
- * profile sequence is resolved into a separate scratch file. */
+/* MENU_VERSION is upstream's and is NEVER edited by the fork, so upstream merges
+ * never conflict here. The fork's own version lives in include/version_x.h
+ * (PLDMGRX_VERSION) and is shown as "based on vX". */
+#define MENU_VERSION "0.6.3"
+/* autoload.txt keeps upstream's meaning: the default/no-profile autoload
+ * sequence, edited by the autoload editor. The fork adds a profile layer on top. */
 #define AUTOLOAD_CONFIG_PATH PLDMGR_DATA_ROOT "/autoload.txt"
-#define STARTUP_LIST_PATH    AUTOLOAD_CONFIG_PATH
-#define PROFILE_SCRATCH_PATH PLDMGR_DATA_ROOT "/profile_run.txt"
+/* Fork: autoload profiles. profiles.json holds named sequences (one may be
+ * "enabled" to auto-run); the enabled/selected profile is resolved into
+ * profile_run.txt, which the worker executes instead of autoload.txt. startup.txt
+ * is an always-run list launched silently on every boot, independent of profiles. */
 #define PROFILES_CONFIG_PATH PLDMGR_DATA_ROOT "/profiles.json"
+#define PROFILE_SCRATCH_PATH PLDMGR_DATA_ROOT "/profile_run.txt"
+#define STARTUP_LIST_PATH    PLDMGR_DATA_ROOT "/startup.txt"
+#define FAVORITES_CONFIG_PATH PLDMGR_DATA_ROOT "/favorites.txt"
 #define PLDMGR_CONFIG_PATH PLDMGR_DATA_ROOT "/pldmgr_config.txt"
 #define REPOSITORY_CACHE_PATH PLDMGR_DATA_ROOT "/repository_cache.json"
 #define PAYLOADS_STORAGE_DIR PLDMGR_DATA_ROOT "/payloads"
+/* Homebrew drop target: ".exfat" files are not payloads/slots — installing one
+ * just copies it here (flat). Shared path (NOT data-root-scoped) by design. */
+#define HOMEBREW_DIR "/data/homebrew"
 #define REPOSITORY_SOURCE_URL                                                  \
-  "https://bsk193.github.io/console-homebrew-hub/payloads.json"
-#define REPOSITORY_REFRESH_INTERVAL_SEC 86400
+  "https://bsk193.github.io/ps5-payloads-mirror-x/payloads_v2.json"
+#define LEGACY_REPOSITORY_SOURCE_URL                                           \
+  "https://bsk193.github.io/ps5-payloads-mirror-x/payloads.json"
+#define REPOSITORY_REFRESH_INTERVAL_SEC 10800
 
 /* Logging (implementation in log_server.c) */
 void pldmgr_log(const char *fmt, ...);
@@ -110,8 +122,8 @@ int pldmgr_server_is_active();
 #define SOURCES_CONFIG_PATH PLDMGR_DATA_ROOT "/sources.json"
 #define MAX_SOURCES 50
 
-/* Scan Locations (Internal + 8 USB ports).
- * The internal dir follows the build's data root; USB payload dirs are shared. */
+/* Scan Locations (Internal + 8 USB ports). The internal dir follows the build's
+ * data root; USB payload dirs stay shared with stock. */
 static const char *SCAN_DIRS[] = {
     PLDMGR_DATA_ROOT,   "/mnt/usb0/pldmgr", "/mnt/usb1/pldmgr",
     "/mnt/usb2/pldmgr", "/mnt/usb3/pldmgr", "/mnt/usb4/pldmgr",

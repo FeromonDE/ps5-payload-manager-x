@@ -1,56 +1,59 @@
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <sys/time.h>
-
-static volatile long long countdown_end_time = 0;
-
-long long get_current_time_ms() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (long long)(tv.tv_sec) * 1000 + (tv.tv_usec) / 1000;
-}
-
+#include <time.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include "pldmgr.h"
 #include "autoload.h"
-#include "payload_mgr.h"
+#include "config.h"
+#include "json_helpers.h"
+#include "slot.h"
 #include "ps5_launcher.h"
 #include "profiles.h"
-#include "json_helpers.h"
+#include "utils.h"
 
-static volatile int abort_flag = 0;
-static volatile int remaining_seconds = -1;
-static volatile int is_executing = 0;
-static pthread_t autoload_thread;
+#ifndef PLDMGR_FRONTEND_WAIT_MS
+#define PLDMGR_FRONTEND_WAIT_MS 5000
+#endif
+#define MAX_SEQUENCE_TEXT 4095
+#define MAX_ENTRY_TEXT 511
+#define MAX_ENTRY_DELAY_MS 3600000
 
-static char autoload_current_name[128] = "";
-static int autoload_total_count = 0;
-static int autoload_done_count = 0;
-static int autoload_triggered = 0; // Starts at 0, becomes 1 when frontend connects
+/* Ownership lock serializes start/stop/join; worker uses only state_mutex.
+ * Never hold state_mutex during join, filesystem access, notifications or launch. */
+static pthread_mutex_t lifecycle_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t state_cond = PTHREAD_COND_INITIALIZER;
+static pthread_t worker_thread;
+static int owned, running, cancel_requested, frontend_ready;
+static long long countdown_end, entry_delay_end;
+static AutoloadSnapshot status = {.state=AUTOLOAD_DISABLED, .remaining=-1, .remaining_ms=-1000,.entry_index=-1};
 
-/* Picker mode: booted with profiles present but none enabled. The worker sets
- * this and returns without running; the frontend shows a selection screen. */
-static volatile int picker_active = 0;
+typedef struct { char key[MAX_ENTRY_TEXT + 1]; int delay_ms; } SequenceEntry;
 
-/* When forced != 0 the worker runs the already-resolved sequence immediately
- * (no startup countdown), bypassing the enabled/picker gating. Set by
- * pldmgr_autoload_run_profile() before starting the worker thread. */
-static volatile int forced_run = 0;
-
-/* Comma-separated list of what the overlay should show for the current phase
- * (startup payloads, then the profile sequence). Read by /autoload_status. */
-static char autoload_run_list[PROFILE_LIST_MAX] = "";
-
-/* Base-name identities already launched this boot (startup + profile + manual),
- * so the same payload never starts twice even across different versions. */
+/* ── Fork: profiles / picker / startup ───────────────────────────────────────
+ * The worker reads its sequence from `sequence_path`. For the no-profile default
+ * it stays AUTOLOAD_CONFIG_PATH (upstream's meaning), so upstream behaviour and
+ * host tests are unchanged; for a profile it points at the resolved scratch file.
+ * `picker_active` means "profiles exist but none enabled" (frontend shows the
+ * selection); `forced_run` means run the resolved sequence now with no countdown.
+ * launched_bases dedups across startup + sequence so a payload never double-launches. */
+static const char *sequence_path = AUTOLOAD_CONFIG_PATH;
+/* Atomic: picker_active is read by the HTTP thread (pldmgr_autoload_is_picker,
+ * via /autoload_status) while the worker writes it; forced_run crosses the
+ * run_profile thread and the worker. sequence_path and launched_* are touched
+ * only by the worker thread (run_profile joins it first), so need no atomics. */
+static _Atomic int picker_active = 0;
+static _Atomic int forced_run = 0;
 #define MAX_LAUNCHED 64
 static char launched_bases[MAX_LAUNCHED][128];
 static int launched_count = 0;
-
 static void launched_reset(void) { launched_count = 0; }
 static int launched_has(const char *base) {
     for (int i = 0; i < launched_count; i++)
@@ -65,84 +68,429 @@ static void launched_add(const char *base) {
     }
 }
 
-int pldmgr_autoload_is_picker() {
-    return picker_active;
+static long long now_ms(void) {
+    struct timespec time;
+    clock_gettime(CLOCK_MONOTONIC, &time);
+    return (long long)time.tv_sec * 1000 + time.tv_nsec / 1000000;
 }
-
-void pldmgr_autoload_get_list(char *buf, size_t size) {
-    if (buf && size) { strncpy(buf, autoload_run_list, size - 1); buf[size - 1] = '\0'; }
+const char *pldmgr_autoload_state_name(AutoloadState state) {
+    const char *names[] = {"disabled", "waiting", "countdown", "executing", "done", "aborted", "failed"};
+    return state >= AUTOLOAD_DISABLED && state <= AUTOLOAD_FAILED ? names[state] : "failed";
 }
-
-/* Set autoload_run_list + total_count from a newline sequence file (payloads
- * only, delays excluded). Used so the overlay shows the current phase's list. */
-static void set_run_list_from_file(const char *path) {
-    autoload_run_list[0] = '\0';
-    autoload_total_count = 0;
-    autoload_done_count = 0;
-    FILE *f = fopen(path, "r");
-    if (!f) return;
-    char line[256];
-    int first = 1;
-    while (fgets(line, sizeof(line), f)) {
-        line[strcspn(line, "\r\n")] = 0;
-        if (line[0] == '\0' || line[0] == '!') continue;
-        if (!first) strncat(autoload_run_list, ",", sizeof(autoload_run_list) - strlen(autoload_run_list) - 1);
-        strncat(autoload_run_list, line, sizeof(autoload_run_list) - strlen(autoload_run_list) - 1);
-        first = 0;
-        autoload_total_count++;
+void pldmgr_autoload_get_snapshot(AutoloadSnapshot *out) {
+    if (!out) return;
+    pthread_mutex_lock(&state_mutex);
+    *out = status;
+    if (status.state == AUTOLOAD_COUNTDOWN) {
+        out->remaining_ms = countdown_end - now_ms();
+        if (out->remaining_ms < 0) out->remaining_ms = 0;
+        out->remaining = (int)((out->remaining_ms + 999) / 1000);
     }
-    fclose(f);
+    if (status.state == AUTOLOAD_EXECUTING && entry_delay_end) {
+        out->entry_remaining_ms = entry_delay_end - now_ms();
+        if (out->entry_remaining_ms < 0) out->entry_remaining_ms = 0;
+    }
+    pthread_mutex_unlock(&state_mutex);
 }
-
-/* Launch every payload in a newline sequence file, honouring "!ms" delays and
- * skipping any payload whose base identity was already launched this boot. When
- * silent != 0 the overlay status (current name, done count) is NOT touched — used
- * for startup payloads, which launch in the background and must not appear as an
- * autoload "sequence" (they can disrupt the manager before the picker shows). */
-static void run_sequence_file(const char *path, int silent) {
-    FILE *f = fopen(path, "r");
+int pldmgr_autoload_get_remaining_seconds(void) {
+    AutoloadSnapshot snapshot; pldmgr_autoload_get_snapshot(&snapshot); return snapshot.remaining;
+}
+long long pldmgr_autoload_get_remaining_ms(void) {
+    AutoloadSnapshot snapshot; pldmgr_autoload_get_snapshot(&snapshot); return snapshot.remaining_ms;
+}
+void pldmgr_autoload_get_status(int *total, int *done, char *current) {
+    AutoloadSnapshot snapshot; pldmgr_autoload_get_snapshot(&snapshot);
+    if (total) *total=snapshot.total;
+    if (done) *done=snapshot.done;
+    if (current) memcpy(current, snapshot.current, sizeof(snapshot.current));
+}
+void pldmgr_autoload_frontend_ready(void) {
+    pthread_mutex_lock(&state_mutex);
+    frontend_ready=1;
+    pthread_cond_broadcast(&state_cond);
+    pthread_mutex_unlock(&state_mutex);
+}
+static int cancelled(void *context) {
+    (void)context;
+    pthread_mutex_lock(&state_mutex);
+    int result=cancel_requested;
+    pthread_mutex_unlock(&state_mutex);
+    return result;
+}
+/* Timed condition waits allow prompt stop without changing countdown deadlines. */
+static int wait_until(long long end, int waiting_frontend) {
+    pthread_mutex_lock(&state_mutex);
+    while (!cancel_requested && !(waiting_frontend && frontend_ready) && now_ms() < end) {
+        struct timespec wake;
+        clock_gettime(CLOCK_REALTIME, &wake);
+        wake.tv_nsec += 100000000;
+        if (wake.tv_nsec >= 1000000000) { wake.tv_sec++; wake.tv_nsec -= 1000000000; }
+        pthread_cond_timedwait(&state_cond, &state_mutex, &wake);
+    }
+    int result=cancel_requested;
+    pthread_mutex_unlock(&state_mutex);
+    return result;
+}
+/* Parse the exact sequence once. Counters and UI list derive from these entries,
+ * not a second pass with different whitespace/delay rules or a newer file. */
+static int read_sequence(SequenceEntry **out, size_t *count, char list[4096]) {
+    *out=NULL; *count=0; list[0]=0;
+    int fd=open(sequence_path,O_RDONLY|O_NONBLOCK);
+    if (fd<0) return errno==ENOENT ? 1 : -1;
+    struct stat info;
+    if (fstat(fd,&info) || !S_ISREG(info.st_mode) || info.st_size<0 || info.st_size>MAX_SEQUENCE_TEXT) {
+        close(fd); return -1;
+    }
+    FILE *file=fdopen(fd,"rb");
+    if (!file) { close(fd); return -1; }
+    char text[MAX_SEQUENCE_TEXT+1];
+    size_t size=fread(text,1,sizeof(text),file);
+    int failed=ferror(file);
+    if (fclose(file)) failed=1;
+    if (failed || size>MAX_SEQUENCE_TEXT || memchr(text,0,size)) return -1;
+    text[size]=0;
+    size_t capacity=1;
+    for (size_t i=0;i<size;i++) if (text[i]=='\n') capacity++;
+    SequenceEntry *entries=calloc(capacity, sizeof(*entries));
+    if (!entries) return -1;
+    char *save=NULL; size_t pos=0;
+    for (char *line=strtok_r(text,"\n",&save);line;line=strtok_r(NULL,"\n",&save)) {
+        while (*line && isspace((unsigned char)*line)) line++;
+        char *end=line+strlen(line);
+        while (end>line && isspace((unsigned char)end[-1])) *--end=0;
+        size_t length=strlen(line);
+        if (!length) continue;
+        if (length > MAX_ENTRY_TEXT || strpbrk(line,"\r,")) goto invalid;
+        SequenceEntry *entry=&entries[*count];
+        entry->delay_ms=-1;
+        if (*line=='!') {
+            if (length==1) goto invalid;
+            long delay=0;
+            for (const char *p=line+1;*p;p++) {
+                if (*p<'0' || *p>'9' || delay > MAX_ENTRY_DELAY_MS/10) goto invalid;
+                delay=delay*10+*p-'0';
+                if (delay > MAX_ENTRY_DELAY_MS) goto invalid;
+            }
+            entry->delay_ms=(int)delay;
+        }
+        size_t needed=length+(pos?1:0);
+        if (needed >= 4096-pos) goto invalid;
+        if (pos) list[pos++]=',';
+        memcpy(list+pos,line,length); pos+=length; list[pos]=0;
+        memcpy(entry->key,line,length+1);
+        (*count)++;
+    }
+    *out=entries; return 0;
+invalid:
+    free(entries); *count=0; list[0]=0; return -1;
+}
+static void set_current(const char *key) {
+    size_t length=strlen(key);
+    if (length>=sizeof(status.current)) {
+        length=sizeof(status.current)-1;
+        while (length && ((unsigned char)key[length]&0xc0)==0x80) length--;
+    }
+    memcpy(status.current,key,length); status.current[length]=0;
+}
+static void finish(AutoloadState state) {
+    pthread_mutex_lock(&state_mutex);
+    if (entry_delay_end) {
+        status.entry_remaining_ms=entry_delay_end-now_ms();
+        if (status.entry_remaining_ms<0) status.entry_remaining_ms=0;
+    }
+    entry_delay_end=0;
+    status.state=cancel_requested ? AUTOLOAD_ABORTED : state;
+    status.remaining=status.state==AUTOLOAD_DONE ? 0 : -1;
+    status.remaining_ms=(long long)status.remaining*1000;
+    snprintf(status.current,sizeof(status.current),"%s",status.state==AUTOLOAD_DONE ? "DONE" : "");
+    countdown_end=0;
+    running=0;
+    pthread_cond_broadcast(&state_cond);
+    pthread_mutex_unlock(&state_mutex);
+}
+/* Launch the always-run startup payloads (startup.txt) silently in the
+ * background, honouring "!ms" delays and skipping duplicates. They are not shown
+ * as an autoload sequence; they run before any profile/countdown. Abortable. */
+static void launch_startup_payloads(void) {
+    FILE *f = fopen(STARTUP_LIST_PATH, "r");
     if (!f) return;
     char line[256];
     while (fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = 0;
         if (line[0] == '\0') continue;
-
         if (line[0] == '!') {
             int delay = atoi(line + 1);
             if (delay > 0) {
-                pldmgr_log("[Autoload] Delaying for %d ms...\n", delay);
-                usleep(delay * 1000);
+                pldmgr_log("[Autoload] Startup delay %d ms...\n", delay);
+                if (wait_until(now_ms() + delay, 0)) break;
             }
             continue;
         }
-
+        if (cancelled(NULL)) break;
+        if (is_pldmgr_name(line)) continue;
         char base[128];
         pldmgr_utils_get_payload_folder_name(line, base, sizeof(base));
-        if (launched_has(base)) {
-            pldmgr_log("[Autoload] Skipping duplicate payload: %s (already launched)\n", line);
-            if (!silent) autoload_done_count++;
-            continue;
-        }
-
-        char full_path[512];
-        if (payload_mgr_resolve_path(line, full_path, sizeof(full_path)) == 0) {
-            if (!silent) strncpy(autoload_current_name, line, sizeof(autoload_current_name) - 1);
-            pldmgr_log("[Autoload] Launching%s: %s\n", silent ? " (startup)" : "", full_path);
-            ps5_launch_elf(full_path);
+        if (launched_has(base)) { pldmgr_log("[Autoload] Startup: already launched %s\n", line); continue; }
+        char path[512];
+        if (slot_resolve(line, path, sizeof(path)) == 0 && !is_pldmgr_name(path)) {
+            pldmgr_log("[Autoload] Launching (startup): %s\n", path);
+            ps5_launch_elf_cancellable(path, cancelled, NULL);
             launched_add(base);
-            if (!silent) autoload_done_count++;
-            usleep(500000); /* UI visibility / launch spacing */
+            if (wait_until(now_ms() + 500, 0)) break; /* launch spacing; abortable */
         } else {
-            pldmgr_log("[Autoload] !!! Payload not found: %s\n", line);
-            if (!silent) autoload_done_count++;
+            pldmgr_log("[Autoload] Startup payload not found: %s\n", line);
         }
     }
     fclose(f);
 }
 
-/* ── Startup payloads (always-run list, stored in STARTUP_LIST_PATH) ──────── */
+static void *autoload_worker(void *argument) {
+    (void)argument;
+    SequenceEntry *entries=NULL; size_t count=0;
+    char list[4096]={0};
+    PldmgrConfig cfg; config_read(&cfg);
+    if (!cfg.autoload_enabled) { finish(AUTOLOAD_DISABLED); return NULL; }
+
+    /* ── Fork: resolve what to run (manual profile / enabled profile / picker /
+     * upstream default), then launch always-run startup payloads. The no-profile,
+     * no-startup, non-forced path leaves sequence_path = AUTOLOAD_CONFIG_PATH and
+     * launches nothing, so it is byte-identical to upstream. ─────────────────── */
+    launched_reset();
+    int forced = forced_run;
+    forced_run = 0;
+    if (forced) {
+        /* run_profile() already wrote PROFILE_SCRATCH_PATH; run it now with no
+         * countdown and no browser wait. Startup payloads already ran at boot. */
+        sequence_path = PROFILE_SCRATCH_PATH;
+        cfg.autoload_delay = 0;
+        cfg.auto_browser_open = 0;
+    } else {
+        picker_active = 0;
+        ProfileEntry *arr = calloc(MAX_PROFILES, sizeof(ProfileEntry));
+        int pcount = 0, active = -1;
+        if (arr) { profiles_load(arr, &pcount); active = profiles_active_index(arr, pcount); }
+        if (active >= 0) {
+            profiles_write_sequence(arr[active].list);
+            sequence_path = PROFILE_SCRATCH_PATH;
+            pldmgr_log("[Autoload] Enabled profile: %s\n", arr[active].name);
+        } else if (pcount > 0) {
+            picker_active = 1; /* set before startup so the status poll keeps the picker visible */
+            pldmgr_log("[Autoload] No enabled profile - startup picker (%d profiles).\n", pcount);
+        } else {
+            sequence_path = AUTOLOAD_CONFIG_PATH; /* upstream default sequence */
+        }
+        if (arr) free(arr);
+
+        launch_startup_payloads();
+
+        /* Picker: do not run a sequence; stay idle so the frontend can offer the
+         * selection. run_profile() takes over when the user picks one. */
+        if (picker_active) { finish(AUTOLOAD_DISABLED); return NULL; }
+    }
+
+    int parsed=read_sequence(&entries,&count,list);
+    if (parsed) {
+        if (parsed<0) pldmgr_log("[Autoload] Invalid or unreadable sequence; no payloads launched.\n");
+        finish(parsed>0 ? AUTOLOAD_DISABLED : AUTOLOAD_FAILED); return NULL;
+    }
+    pthread_mutex_lock(&state_mutex);
+    status.delay=cfg.autoload_delay;
+    status.scan_usb_payloads=cfg.scan_usb_payloads;
+    memcpy(status.list,list,sizeof(list));
+    for (size_t i=0;i<count;i++) if (entries[i].delay_ms<0) status.outcomes[status.total++]='p';
+    status.state=AUTOLOAD_WAITING;
+    status.remaining=cfg.autoload_delay;
+    status.remaining_ms=(long long)cfg.autoload_delay*1000;
+    pthread_mutex_unlock(&state_mutex);
+    if (cfg.auto_browser_open) {
+        pldmgr_log("[Autoload] Browser Mode: Waiting for frontend connection...\n");
+        if (wait_until(now_ms()+PLDMGR_FRONTEND_WAIT_MS,1)) goto aborted;
+    }
+    if (cancelled(NULL)) goto aborted;
+    pthread_mutex_lock(&state_mutex);
+    status.state=AUTOLOAD_COUNTDOWN;
+    countdown_end=now_ms()+(long long)cfg.autoload_delay*1000;
+    long long end=countdown_end;
+    pthread_mutex_unlock(&state_mutex);
+
+    /* Preserve the existing PS-button mode, prompt/drain ordering and per-read
+     * matching. The user explicitly withdrew the separate detection changes. */
+    int klog_fd=-1;
+    if (cfg.autoload_delay>0 && !cfg.auto_browser_open) {
+        if (!pldmgr_server_is_active()) {
+            char ip[64];
+            if (pldmgr_get_local_ip(ip,sizeof(ip))!=0) strcpy(ip,"0.0.0.0");
+            pldmgr_notify("Payload Manager Running\nhttp://%s:%d",ip,MENU_PORT);
+            pldmgr_notify("Autoloading in %ds\nPress PS Button to Abort",cfg.autoload_delay);
+        }
+        klog_fd=open("/dev/klog",O_RDONLY|O_NONBLOCK);
+        if (klog_fd>=0) {
+            char flush[4096];
+            while (read(klog_fd,flush,sizeof(flush))>0) {
+                if (cancelled(NULL)) { close(klog_fd); goto aborted; }
+            }
+        }
+        pldmgr_log("[Autoload] Fallback Mode: Starting %ds countdown (PS Button active)...\n",cfg.autoload_delay);
+    } else if (cfg.autoload_delay>0) {
+        pldmgr_log("[Autoload] Browser Mode: Starting %ds countdown...\n",cfg.autoload_delay);
+    }
+    while (now_ms()<end) {
+        if (cancelled(NULL)) { if(klog_fd>=0)close(klog_fd); goto aborted; }
+        if (klog_fd>=0) {
+            char log[2048]; ssize_t n=read(klog_fd,log,sizeof(log)-1);
+            if (n>0) {
+                log[n]=0;
+                if (strstr(log,"onPSButtonPressed")) {
+                    pldmgr_log("[Autoload] ABORTED via PS Button.\n");
+                    pldmgr_notify("Autoload Aborted");
+                    pldmgr_autoload_abort(); close(klog_fd); goto aborted;
+                }
+            }
+        }
+        long long tick=now_ms()+100;
+        if (tick>end) tick=end;
+        if (wait_until(tick,0)) { if(klog_fd>=0)close(klog_fd); goto aborted; }
+    }
+    if (klog_fd>=0) close(klog_fd);
+    if (cancelled(NULL)) goto aborted;
+    pthread_mutex_lock(&state_mutex);
+    status.state=AUTOLOAD_EXECUTING; status.remaining=0; status.remaining_ms=0; countdown_end=0;
+    pthread_mutex_unlock(&state_mutex);
+    pldmgr_log("[Autoload] Starting sequence...\n");
+    int payload_index=0;
+    for (size_t i=0;i<count;i++) {
+        if (cancelled(NULL)) goto aborted;
+        SequenceEntry *entry=&entries[i];
+        if (entry->delay_ms>=0) {
+            long long deadline=now_ms()+entry->delay_ms;
+            pthread_mutex_lock(&state_mutex);
+            status.entry_index=(int)i;
+            status.entry_duration_ms=entry->delay_ms;
+            status.entry_remaining_ms=entry->delay_ms;
+            entry_delay_end=deadline;
+            snprintf(status.current,sizeof(status.current),"DELAY");
+            pthread_mutex_unlock(&state_mutex);
+            if (wait_until(deadline,0)) goto aborted;
+            pthread_mutex_lock(&state_mutex);
+            status.entry_remaining_ms=0; entry_delay_end=0;
+            pthread_mutex_unlock(&state_mutex);
+            continue;
+        }
+        pthread_mutex_lock(&state_mutex);
+        status.entry_index=(int)i;
+        status.entry_duration_ms=0; status.entry_remaining_ms=0; entry_delay_end=0;
+        set_current(entry->key);
+        pthread_mutex_unlock(&state_mutex);
+        int skipped=0, failed=0;
+        char path[512];
+        char base[128];
+        pldmgr_utils_get_payload_folder_name(entry->key, base, sizeof(base));
+        if (is_pldmgr_name(entry->key)) skipped=1;
+        else if (launched_has(base)) { skipped=1; pldmgr_log("[Autoload] Skipping already-launched: %s\n", entry->key); }
+        else if (slot_resolve(entry->key,path,sizeof(path))) failed=1;
+        else if (is_pldmgr_name(path)) skipped=1;
+        else {
+            pldmgr_log("[Autoload] Launching: %s\n",path);
+            if (ps5_launch_elf_cancellable(path,cancelled,NULL)) failed=1;
+            else launched_add(base);
+        }
+        if (skipped) pldmgr_log("[Autoload] Skipping self: %s\n",entry->key);
+        if (failed) pldmgr_log("[Autoload] Missing, failed or cancelled payload: %s\n",entry->key);
+        pthread_mutex_lock(&state_mutex);
+        status.done++;
+        status.outcomes[payload_index++]=skipped ? 'k' : failed ? 'f' : 's';
+        status.skipped+=skipped;
+        status.failed+=failed;
+        status.successful+=!skipped && !failed;
+        pthread_mutex_unlock(&state_mutex);
+        if (cancelled(NULL)) goto aborted;
+        if (wait_until(now_ms()+500,0)) goto aborted;
+    }
+    free(entries); finish(AUTOLOAD_DONE);
+    pldmgr_log("[Autoload] Sequence complete.\n"); return NULL;
+aborted:
+    free(entries); finish(AUTOLOAD_ABORTED);
+    pldmgr_log("[Autoload] Sequence aborted.\n"); return NULL;
+}
+int pldmgr_autoload_start(void) {
+    pthread_mutex_lock(&lifecycle_mutex);
+    if (owned) { pthread_mutex_unlock(&lifecycle_mutex); return 0; }
+    pthread_mutex_lock(&state_mutex);
+    status=(AutoloadSnapshot){.state=AUTOLOAD_WAITING,.remaining=-1,.remaining_ms=-1000,.entry_index=-1};
+    cancel_requested=0; frontend_ready=0; countdown_end=0; entry_delay_end=0; running=1;
+    int result=pthread_create(&worker_thread,NULL,autoload_worker,NULL);
+    if (result) { running=0;status.state=AUTOLOAD_FAILED; }
+    else owned=1;
+    pthread_mutex_unlock(&state_mutex);
+    pthread_mutex_unlock(&lifecycle_mutex);
+    if (result) pldmgr_log("[Autoload] Failed to create worker: %s\n",strerror(result));
+    return result ? -1 : 0;
+}
+void pldmgr_autoload_abort(void) {
+    pthread_mutex_lock(&state_mutex);
+    if (running) { cancel_requested=1; pthread_cond_broadcast(&state_cond); }
+    pthread_mutex_unlock(&state_mutex);
+}
+void pldmgr_autoload_stop(void) {
+    pthread_mutex_lock(&lifecycle_mutex);
+    if (owned) {
+        pldmgr_autoload_abort();
+        pthread_join(worker_thread,NULL);
+        owned=0;
+    }
+    pthread_mutex_unlock(&lifecycle_mutex);
+}
+void pldmgr_autoload_reset(void) {
+    pthread_mutex_lock(&state_mutex);
+    if (!running) {
+        status=(AutoloadSnapshot){.state=AUTOLOAD_DISABLED,.remaining=-1,.remaining_ms=-1000,.entry_index=-1};
+        countdown_end=0; entry_delay_end=0;
+    }
+    pthread_mutex_unlock(&state_mutex);
+}
+int pldmgr_autoload_update_config_entry(const char *old_key,const char *new_key) {
+    int result=config_update_list_entry(AUTOLOAD_CONFIG_PATH,old_key,new_key);
+    if (result) pldmgr_log("[Autoload] Failed to update entry: %s\n",old_key ? old_key : "");
+    return result;
+}
+
+/* ── Fork: profiles / picker / startup ─────────────────────────────────── */
+
+int pldmgr_autoload_is_picker(void) { return picker_active; }
+
+void pldmgr_autoload_get_list(char *buf, size_t size) {
+    if (!buf || !size) return;
+    AutoloadSnapshot s;
+    pldmgr_autoload_get_snapshot(&s);
+    strncpy(buf, s.list, size - 1);
+    buf[size - 1] = '\0';
+}
+
+int pldmgr_autoload_run_profile(const char *id) {
+    if (!id || !id[0]) return -1;
+    ProfileEntry *arr = calloc(MAX_PROFILES, sizeof(ProfileEntry));
+    if (!arr) return -1;
+    int count = 0;
+    profiles_load(arr, &count);
+    int idx = profiles_find_by_id(arr, count, id);
+    if (idx < 0) { free(arr); return -1; }
+    int rc = profiles_write_sequence(arr[idx].list);
+    free(arr);
+    if (rc != 0) return -1;
+    /* Stop the finished/idle boot worker, then run the resolved sequence now
+     * (forced => no countdown). stop() joins; start() spawns a fresh worker. */
+    pldmgr_autoload_stop();
+    picker_active = 0;
+    forced_run = 1;
+    rc = pldmgr_autoload_start();
+    if (rc != 0) forced_run = 0;
+    return rc;
+}
+
+/* ── Fork: always-run startup payloads (startup.txt) ───────────────────── */
 
 int pldmgr_startup_is_enabled(const char *filename) {
+    if (!filename) return 0;
     FILE *f = fopen(STARTUP_LIST_PATH, "r");
     if (!f) return 0;
     char line[256];
@@ -157,7 +505,6 @@ int pldmgr_startup_is_enabled(const char *filename) {
 
 void pldmgr_startup_set(const char *filename, int enabled) {
     if (!filename || !filename[0]) return;
-
     /* Read existing entries (excluding the target). */
     char entries[MAX_LAUNCHED][256];
     int n = 0;
@@ -174,7 +521,6 @@ void pldmgr_startup_set(const char *filename, int enabled) {
         }
         fclose(f);
     }
-
     ensure_dir_recursive(BASE_DATA_DIR);
     f = fopen(STARTUP_LIST_PATH, "w");
     if (!f) return;
@@ -185,7 +531,7 @@ void pldmgr_startup_set(const char *filename, int enabled) {
 }
 
 int pldmgr_startup_list_json(char *buf, size_t size) {
-    JsonListBuilder jb = { buf, size, 0, 1 };
+    JsonListBuilder jb = { buf, size, 0, 1, 0 };
     buf[0] = '\0';
     json_append(&jb, "{\"startup\":[");
     FILE *f = fopen(STARTUP_LIST_PATH, "r");
@@ -196,7 +542,7 @@ int pldmgr_startup_list_json(char *buf, size_t size) {
             line[strcspn(line, "\r\n")] = 0;
             if (line[0] == '\0') continue;
             char esc[512];
-            pldmgr_json_escape(line, esc, sizeof(esc));
+            json_escape_checked(&jb, line, esc, sizeof(esc));
             json_append(&jb, "%s\"%s\"", first ? "" : ",", esc);
             first = 0;
         }
@@ -204,346 +550,4 @@ int pldmgr_startup_list_json(char *buf, size_t size) {
     }
     json_append(&jb, "]}");
     return 0;
-}
-
-int pldmgr_autoload_get_remaining_seconds() {
-    return remaining_seconds;
-}
-
-long long pldmgr_autoload_get_remaining_ms() {
-    if (countdown_end_time == 0) return (long long)remaining_seconds * 1000;
-    long long now = get_current_time_ms();
-    if (now >= countdown_end_time) return 0;
-    return countdown_end_time - now;
-}
-
-void pldmgr_autoload_get_status(int *total, int *done, char *current) {
-    autoload_triggered = 1; // Signal that frontend is ready/active
-    *total = autoload_total_count;
-    *done = autoload_done_count;
-    if (current) strcpy(current, autoload_current_name);
-}
-
-void* pldmgr_autoload_worker(void* arg) {
-    struct stat st;
-
-    int browser_open = 1;
-    int auto_delay = 5;
-
-    FILE *ef = fopen(PLDMGR_CONFIG_PATH, "r");
-    if (ef) {
-        char line[128];
-        while (fgets(line, sizeof(line), ef)) {
-            if (strncmp(line, "AUTO_BROWSER_OPEN=", 18) == 0) {
-                browser_open = atoi(line + 18);
-            } else if (strncmp(line, "AUTOLOAD_DELAY=", 15) == 0) {
-                auto_delay = atoi(line + 15);
-            }
-        }
-        fclose(ef);
-    }
-
-    int forced = forced_run;
-
-    /* ── Manual run (user picked a profile from the startup selection) ──────
-     * The chosen profile is already resolved into PROFILE_SCRATCH_PATH. Run it
-     * immediately with no countdown. Startup payloads already ran at boot, so
-     * launched_bases still holds them and duplicates are skipped. */
-    if (forced) {
-        if (stat(PROFILE_SCRATCH_PATH, &st) != 0) {
-            pldmgr_log("[Autoload] !!! Manual run: resolved sequence missing.\n");
-            forced_run = 0;
-            return NULL;
-        }
-        pldmgr_log("[Autoload] Manual run: executing selected profile immediately.\n");
-        countdown_end_time = 0;
-        remaining_seconds = 0;
-        is_executing = 1;
-        set_run_list_from_file(PROFILE_SCRATCH_PATH);
-        run_sequence_file(PROFILE_SCRATCH_PATH, 0);
-        strcpy(autoload_current_name, "DONE");
-        remaining_seconds = 0;
-        is_executing = 0;
-        forced_run = 0;
-        return NULL;
-    }
-
-    /* ── Boot ─────────────────────────────────────────────────────────────── */
-    launched_reset();
-    autoload_run_list[0] = '\0';
-    autoload_total_count = 0;
-    autoload_done_count = 0;
-    autoload_current_name[0] = '\0';
-    remaining_seconds = -1;
-    is_executing = 0;
-    countdown_end_time = 0;
-
-    /* Resolve the profile state UP FRONT so picker_active is set BEFORE we launch
-     * startup payloads. Startup payloads launch silently (idle overlay), and the
-     * frontend's status poll stops when it sees an idle state — so if the picker
-     * flag were set only afterwards, the poll would already have stopped and the
-     * selection screen would never appear. */
-    char active_list[PROFILE_LIST_MAX] = "";
-    int has_active = 0;
-    {
-        ProfileEntry *arr = calloc(MAX_PROFILES, sizeof(ProfileEntry));
-        if (!arr) return NULL;
-        int count = 0;
-        profiles_load(arr, &count);
-        int active = profiles_active_index(arr, count);
-        if (active >= 0) {
-            has_active = 1;
-            strncpy(active_list, arr[active].list, sizeof(active_list) - 1);
-            active_list[sizeof(active_list) - 1] = '\0';
-            pldmgr_log("[Autoload] Enabled profile: %s\n", arr[active].name);
-        } else if (count > 0) {
-            picker_active = 1; /* set before startup launch so the poll stays alive */
-            pldmgr_log("[Autoload] No enabled profile - will show startup picker (%d profiles).\n", count);
-        } else {
-            pldmgr_log("[Autoload] No profiles configured - booting to dashboard.\n");
-        }
-        free(arr);
-    }
-
-    /* Wait briefly for the frontend so the overlay/picker is ready. Stop early if
-     * the user already picked a profile — a forced run has then taken over the
-     * overlay and this boot worker must get out of its way. */
-    if (browser_open) {
-        pldmgr_log("[Autoload] Browser Mode: Waiting for frontend connection...\n");
-        int wait_timeout = 50; /* 50 * 100ms = 5 seconds */
-        while (!autoload_triggered && !forced_run && wait_timeout-- > 0) {
-            usleep(100000);
-        }
-    }
-
-    /* If a manual profile run started while we were waiting, it now owns the
-     * overlay status and its own worker is running the sequence. Bail before we
-     * launch startup payloads under it or clobber its status. */
-    if (forced_run) {
-        pldmgr_log("[Autoload] Manual run started during boot - yielding.\n");
-        return NULL;
-    }
-
-    /* Phase 1: startup payloads — launch silently in the background. They are NOT
-     * shown as an autoload sequence (that froze the overlay on a phantom list).
-     * Dedup still applies via launched_bases. */
-    if (stat(STARTUP_LIST_PATH, &st) == 0) {
-        pldmgr_log("[Autoload] Launching startup payloads (background)...\n");
-        run_sequence_file(STARTUP_LIST_PATH, 1);
-    }
-
-    /* A manual run may have started while startup payloads were launching. If so,
-     * do NOT fall through to the reset below — it would wipe the forced run's
-     * list/status and leave an "empty" load screen. */
-    if (forced_run) {
-        pldmgr_log("[Autoload] Manual run started during startup - yielding.\n");
-        return NULL;
-    }
-
-    /* Phase 2: no active profile -> the picker (already flagged) or dashboard. */
-    if (!has_active) {
-        is_executing = 0;
-        remaining_seconds = -1;
-        countdown_end_time = 0;
-        autoload_run_list[0] = '\0';
-        autoload_current_name[0] = '\0';
-        autoload_total_count = 0;
-        autoload_done_count = 0;
-        return NULL;
-    }
-
-    /* Active profile: resolve to the scratch file and run it with a countdown. */
-    profiles_write_sequence(active_list);
-    if (stat(PROFILE_SCRATCH_PATH, &st) != 0) {
-        pldmgr_log("[Autoload] !!! Resolved profile sequence missing.\n");
-        is_executing = 0;
-        remaining_seconds = -1;
-        return NULL;
-    }
-
-    /* Show the profile sequence and run its countdown (abort-able). */
-    set_run_list_from_file(PROFILE_SCRATCH_PATH);
-    remaining_seconds = auto_delay;
-    countdown_end_time = get_current_time_ms() + (long long)auto_delay * 1000;
-
-    if (auto_delay > 0) {
-        int klog_fd = -1;
-
-        /* Only fall back to on-screen notification + PS button if the browser
-         * is NOT auto-opened. */
-        if (!browser_open) {
-            if (!pldmgr_server_is_active()) {
-                char ip[64];
-                if (pldmgr_get_local_ip(ip, sizeof(ip)) != 0) strcpy(ip, "0.0.0.0");
-                pldmgr_notify(PLDMGR_APP_NAME " Running\nhttp://%s:%d", ip, MENU_PORT);
-                pldmgr_notify("Autoloading in %ds\nPress PS Button to Abort", auto_delay);
-            }
-
-            klog_fd = open("/dev/klog", O_RDONLY | O_NONBLOCK);
-            if (klog_fd >= 0) {
-                char flush_buf[4096];
-                while (read(klog_fd, flush_buf, sizeof(flush_buf)) > 0);
-            }
-            pldmgr_log("[Autoload] Fallback Mode: Starting %ds countdown (PS Button active)...\n", auto_delay);
-        } else {
-            pldmgr_log("[Autoload] Browser Mode: Starting %ds countdown...\n", auto_delay);
-        }
-
-        char klog_buf[2048];
-        long long remaining_ms;
-        while ((remaining_ms = countdown_end_time - get_current_time_ms()) > 0) {
-            remaining_seconds = (int)((remaining_ms + 999) / 1000);
-            if (abort_flag) {
-                if (klog_fd >= 0) close(klog_fd);
-                countdown_end_time = 0;
-                remaining_seconds = -1;
-                is_executing = 0;
-                return NULL;
-            }
-
-            if (klog_fd >= 0) {
-                ssize_t n = read(klog_fd, klog_buf, sizeof(klog_buf) - 1);
-                if (n > 0) {
-                    klog_buf[n] = 0;
-                    if (strstr(klog_buf, "onPSButtonPressed")) {
-                        pldmgr_log("[Autoload] ABORTED via PS Button.\n");
-                        pldmgr_notify("Autoload Aborted");
-                        abort_flag = 1;
-                        close(klog_fd);
-                        countdown_end_time = 0;
-                        remaining_seconds = -1;
-                        is_executing = 0;
-                        return NULL;
-                    }
-                }
-            }
-            usleep(100000); /* 100ms */
-        }
-        if (klog_fd >= 0) close(klog_fd);
-    }
-    countdown_end_time = 0;
-    remaining_seconds = 0;
-
-    is_executing = 1;
-    pldmgr_log("[Autoload] Starting profile sequence...\n");
-    run_sequence_file(PROFILE_SCRATCH_PATH, 0);
-
-    pldmgr_log("[Autoload] Sequence complete.\n");
-    strcpy(autoload_current_name, "DONE");
-    remaining_seconds = 0;
-    is_executing = 0;
-    return NULL;
-}
-
-int pldmgr_autoload_start() {
-    abort_flag = 0;
-    is_executing = 0;
-    forced_run = 0;
-    if (pthread_create(&autoload_thread, NULL, pldmgr_autoload_worker, NULL) != 0) {
-        pldmgr_log("[Autoload] !!! Failed to create background thread\n");
-        return -1;
-    }
-    pthread_detach(autoload_thread);
-    return 0;
-}
-
-int pldmgr_autoload_run_profile(const char *id) {
-    if (!id || !id[0]) return -1;
-
-    ProfileEntry *arr = calloc(MAX_PROFILES, sizeof(ProfileEntry));
-    if (!arr) return -1;
-    int count = 0;
-    profiles_load(arr, &count);
-    int idx = profiles_find_by_id(arr, count, id);
-    if (idx < 0) {
-        free(arr);
-        pldmgr_log("[Autoload] !!! Manual run: unknown profile id '%s'\n", id);
-        return -1;
-    }
-
-    pldmgr_log("[Autoload] Manual run requested: %s | sequence: %s\n",
-               arr[idx].name, arr[idx].list[0] ? arr[idx].list : "(EMPTY)");
-    profiles_write_sequence(arr[idx].list);
-    free(arr);
-
-    /* Leaving the picker and starting a forced (no-countdown) run. Prime the
-     * status fields up front so the first poll sees an active run (remaining >= 0)
-     * rather than a stale idle value, avoiding a dashboard flash. */
-    picker_active = 0;
-    abort_flag = 0;
-    is_executing = 0;
-    autoload_total_count = 0;
-    autoload_done_count = 0;
-    remaining_seconds = 0;
-    countdown_end_time = 0;
-    strcpy(autoload_current_name, "");
-    forced_run = 1;
-
-    if (pthread_create(&autoload_thread, NULL, pldmgr_autoload_worker, NULL) != 0) {
-        pldmgr_log("[Autoload] !!! Failed to create background thread\n");
-        forced_run = 0;
-        return -1;
-    }
-    pthread_detach(autoload_thread);
-    return 0;
-}
-
-void pldmgr_autoload_abort() {
-    if (!is_executing) {
-        abort_flag = 1;
-    }
-}
-
-void pldmgr_autoload_reset() {
-    /* If already counting down, don't reset to avoid jumps.
-     * The browser launch often triggers a system 'resume' which would snap time back.
-     * We only reset if the countdown has already finished or hasn't started. */
-    if (countdown_end_time > 0 && remaining_seconds > 0) {
-        pldmgr_log("[PLDMGR] Autoload reset ignored (timer active)\n");
-        return;
-    }
-
-    pldmgr_log("[PLDMGR] Autoload reset triggered\n");
-    remaining_seconds = -1;
-    is_executing = 0;
-    picker_active = 0;
-    forced_run = 0;
-    autoload_total_count = 0;
-    autoload_done_count = 0;
-    autoload_triggered = 0;
-    strcpy(autoload_current_name, "");
-}
-
-void pldmgr_autoload_update_config_entry(const char *old_filename, const char *new_filename) {
-    /* A payload rename/removal must be reflected in every profile's sequence
-     * AND in the startup list (autoload.txt). */
-    profiles_propagate_payload_change(old_filename, new_filename);
-
-    /* Update the startup list: rewrite it, replacing or dropping the entry. */
-    FILE *f = fopen(STARTUP_LIST_PATH, "r");
-    if (!f) return;
-    char lines[MAX_LAUNCHED][256];
-    int n = 0, modified = 0;
-    char line[256];
-    while (n < MAX_LAUNCHED && fgets(line, sizeof(line), f)) {
-        line[strcspn(line, "\r\n")] = 0;
-        if (line[0] == '\0') continue;
-        if (strcmp(line, old_filename) == 0) {
-            modified = 1;
-            if (new_filename) { strncpy(lines[n], new_filename, sizeof(lines[0]) - 1); lines[n][sizeof(lines[0]) - 1] = '\0'; n++; }
-            /* else: drop the entry (delete) */
-        } else {
-            strncpy(lines[n], line, sizeof(lines[0]) - 1);
-            lines[n][sizeof(lines[0]) - 1] = '\0';
-            n++;
-        }
-    }
-    fclose(f);
-    if (modified) {
-        f = fopen(STARTUP_LIST_PATH, "w");
-        if (f) {
-            for (int i = 0; i < n; i++) fprintf(f, "%s\n", lines[i]);
-            fclose(f);
-        }
-    }
 }

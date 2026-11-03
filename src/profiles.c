@@ -88,15 +88,15 @@ static int parse_profiles(const char *json, ProfileEntry *out, int *count) {
 /* ── Serialize ─────────────────────────────────────────────── */
 
 static int build_json(const ProfileEntry *arr, int count, char *buf, size_t size) {
-    JsonListBuilder jb = { buf, size, 0, 1 };
+    JsonListBuilder jb = { buf, size, 0, 1, 0 };
     buf[0] = '\0';
 
     json_append(&jb, "{\"profiles\":[\n");
     for (int i = 0; i < count; i++) {
         char id_e[128], name_e[256], list_e[PROFILE_LIST_MAX * 2];
-        pldmgr_json_escape(arr[i].id,   id_e,   sizeof(id_e));
-        pldmgr_json_escape(arr[i].name, name_e, sizeof(name_e));
-        pldmgr_json_escape(arr[i].list, list_e, sizeof(list_e));
+        json_escape_checked(&jb, arr[i].id,   id_e,   sizeof(id_e));
+        json_escape_checked(&jb, arr[i].name, name_e, sizeof(name_e));
+        json_escape_checked(&jb, arr[i].list, list_e, sizeof(list_e));
         if (json_append(&jb,
                 "  {\"id\":\"%s\",\"name\":\"%s\",\"enabled\":%s,\"list\":\"%s\"}%s\n",
                 id_e, name_e, arr[i].enabled ? "true" : "false", list_e,
@@ -132,10 +132,11 @@ int profiles_load(ProfileEntry *out, int *count) {
     }
     if (json) free(json);
 
-    /* No profiles file yet: start empty and persist so this branch never runs
-     * again. (autoload.txt is the startup-payload list, not a legacy profile.) */
+    /* No profiles file yet: start empty, with no filesystem side-effect. The
+     * default/no-profile autoload sequence lives in autoload.txt (upstream's
+     * meaning); always-run startup payloads live in the separate startup list. */
+    memset(out, 0, sizeof(ProfileEntry) * MAX_PROFILES);
     *count = 0;
-    save_profiles(out, 0);
     return 0;
 }
 

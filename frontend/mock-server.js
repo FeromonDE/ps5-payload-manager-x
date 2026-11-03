@@ -1,9 +1,29 @@
 import express from 'express';
-import cors from 'cors';
+import { mutationPolicy } from './mock-policy.js';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
-app.use(cors());
+app.use(mutationPolicy);
 app.use(express.json());
+app.use(express.text({ type: 'text/plain', limit: '1mb' }));
+app.use((req, res, next) => {
+  if (typeof req.body === 'string') {
+    try { req.body = JSON.parse(req.body); }
+    catch { return res.status(400).json({ error: 'Invalid JSON' }); }
+  }
+  next();
+});
+
+// Public development fixture files are fetched as ordinary cross-origin GETs
+// by the README view; this exception never authorizes API preflights/mutations.
+const publicFixture = (req, res, next) => {
+  res.set('Access-Control-Allow-Origin', '*'); next();
+};
+// Serve the locally generated details/ README folder (repo root)
+app.use('/details', publicFixture, express.static(path.resolve(process.cwd(), '..', 'details')));
+app.use('/test_icons.json', publicFixture, express.static(path.resolve(process.cwd(), '..', 'test_icons.json')));
+app.use('/test_repo.json', publicFixture, express.static(path.resolve(process.cwd(), '..', 'test_repo.json')));
 
 // Log all requests to terminal
 app.use((req, res, next) => {
@@ -19,55 +39,26 @@ let logs = [
   "[PLDMGR] Found 3 payloads on storage"
 ];
 
-const remoteRepository = [
-  {
-    name: "ftpsrv",
-    filename: "ftpsrv_v0.19.elf",
-    url: "https://itsplk.github.io/ps5_payloads/payloads/ftpsrv_v0.19.elf",
-    description: "A simple FTP server that accepts connections on port 2121",
-    version: "v0.19",
-    min_fw: "1.00",
-    max_fw: "10.20",
-    checksum: "e6c1babbfd5e1b766d12b659853b514b9faedf6333cbe8cb514b1a3e79b7ce39"
-  },
-  {
-    name: "KStuff",
-    filename: "kstuff_v1.11.elf",
-    url: "https://bsk193.github.io/console-homebrew-hub/payloads/kstuff_v1.11.elf",
-    description: "EchoStretch KStuff Lite (newer than installed v1.10)",
-    version: "v1.11",
-    min_fw: "1.00",
-    max_fw: "10.20"
-  },
-  {
-    name: "KStuff",
-    filename: "kstuff_v1.6.7.elf",
-    url: "https://bsk193.github.io/console-homebrew-hub/payloads/kstuff_v1.6.7.elf",
-    description: "EchoStretch KStuff old (older than installed v1.10)",
-    version: "v1.6.7",
-    min_fw: "1.00",
-    max_fw: "7.61"
-  },
-  {
-    name: "KStuff",
-    filename: "kstuff_v1.12-beta.elf",
-    url: "https://bsk193.github.io/console-homebrew-hub/payloads/kstuff_v1.12-beta.elf",
-    description: "EchoStretch KStuff experimental preview build",
-    version: "v1.12-beta",
-    channel: "experimental",
-    min_fw: "1.00",
-    max_fw: "10.20"
-  },
-  {
-    name: "KStuff Lite DR",
-    filename: "kstuff_1.2-dr-test1.elf",
-    url: "https://bsk193.github.io/console-homebrew-hub/payloads/kstuff_1.2-dr-test1.elf",
-    description: "Drakmor KStuff variant (different payload, must NOT show update)",
-    version: "1.2-dr-test1",
-    min_fw: "1.00",
-    max_fw: "10.20"
-  }
-];
+// Load the new-schema test repository (icons, author, release_notes, details_url)
+let remoteRepository = [];
+let remoteIcons = {};
+try {
+  const testRepo = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), '..', 'test_repo.json'), 'utf8'));
+  remoteRepository = testRepo.payloads || [];
+  remoteIcons = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "..", "test_icons.json"), "utf8")).icons;
+} catch {
+  console.log('[Mock] Could not load ../test_repo.json — using built-in payloads');
+  remoteRepository = [
+    {
+      name: "ftpsrv",
+      filename: "ftpsrv_v0.19.elf",
+      url: "https://itsplk.github.io/ps5_payloads/payloads/ftpsrv_v0.19.elf",
+      description: "A simple FTP server that accepts connections on port 2121",
+      version: "v0.19",
+      checksum: "e6c1babbfd5e1b766d12b659853b514b9faedf6333cbe8cb514b1a3e79b7ce39"
+    }
+  ];
+}
 
 const communityRepository = [
   {
@@ -75,93 +66,47 @@ const communityRepository = [
     filename: "ps5_hen_test_v1.0.elf",
     url: "https://example.com/payloads/ps5_hen_test_v1.0.elf",
     description: "Community hen test payload — no checksum",
-    version: "v1.0"
+    version: "v1.0",
+    author: "hen-community",
+    release_notes: "## v1.0\n\n- No icon set — exercises the deterministic fake-icon fallback",
+    details_url: "details/etahen.md"
   },
   {
     name: "Debug Tool",
     filename: "debug_tool_v2.1.elf",
     url: "https://example.com/payloads/debug_tool_v2.1.elf",
     description: "Debug utility from community repo",
-    version: "v2.1"
+    version: "v2.1",
+    author: "ps5-payload-dev",
+    release_notes: "## v2.1\n\n- Second community payload",
+    details_url: "details/elfldr.md"
   }
 ];
 
 let lastRepositoryUpdate = Math.floor(Date.now() / 1000);
 
 let mockSources = [
-  { id: 'default', name: 'Official Repository', url: 'https://bsk193.github.io/console-homebrew-hub/payloads.json', removable: false },
+  { id: 'default', name: 'Official Repository', url: 'https://itsplk.github.io/ps5-payloads-mirror/payloads.json', removable: false },
   { id: 'source_community', name: 'Community Payloads', url: 'https://example.com/community-payloads.json', removable: true }
 ];
 
-// Profiles (autoload sequences). `list` is a comma-separated string on the wire.
-// Default: two profiles, none enabled -> boots into the startup picker so the
-// new feature is visible immediately. Enable one to test the auto-run path.
-let mockProfiles = [
-  { id: 'gaming', name: 'Gaming', enabled: false, list: 'goldhen_v2.4b17.elf,!1000,etaHEN_1.8.elf' },
-  { id: 'development', name: 'Development', enabled: false, list: 'kstuff.elf' }
-];
-
 let autoloadStatus = {
-  remaining: -1,
-  remaining_ms: -1000,
-  total: 0,
+  remaining: 10,
+  total: 2,
   done: 0,
   current: "IDLE",
-  list: "",
-  delay: 5,
-  picker: false
+  list: "goldhen_v2.4b17.elf,etaHEN_1.8.elf"
 };
 
-let seqEntries = [];       // payloads of the currently running sequence (no delays)
+const autoloadList = autoloadStatus.list.split(',');
 let simulationTicks = 0;
-
-function resolveActive() {
-  return mockProfiles.find(p => p.enabled === true || p.enabled === 'true') || null;
-}
-
-function startSequence(listStr, withCountdown) {
-  const entries = String(listStr || '').split(',').filter(Boolean);
-  seqEntries = entries.filter(e => !e.startsWith('!'));
-  autoloadStatus.list = seqEntries.join(',');
-  autoloadStatus.total = seqEntries.length;
-  autoloadStatus.done = 0;
-  autoloadStatus.picker = false;
-  autoloadStatus.delay = 5;
-  simulationTicks = 0;
-  if (withCountdown) {
-    autoloadStatus.remaining = 5;
-    autoloadStatus.remaining_ms = 5000;
-    autoloadStatus.current = '';
-  } else {
-    autoloadStatus.remaining = 0;
-    autoloadStatus.remaining_ms = 0;
-    autoloadStatus.current = seqEntries[0] || 'DONE';
-  }
-}
-
-// Boot decision (mirrors the backend autoload worker).
-(function boot() {
-  const active = resolveActive();
-  if (active) {
-    logs.push(`[PLDMGR] Autoload: enabled profile '${active.name}'`);
-    startSequence(active.list, true);
-  } else if (mockProfiles.length > 0) {
-    logs.push(`[PLDMGR] Autoload: no enabled profile - showing startup picker`);
-    autoloadStatus.picker = true;
-    autoloadStatus.remaining = -1;
-    autoloadStatus.remaining_ms = -1000;
-  } else {
-    logs.push(`[PLDMGR] Autoload: no profiles - booting to dashboard`);
-  }
-})();
 
 setInterval(() => {
   if (autoloadStatus.remaining > 0) {
     autoloadStatus.remaining--;
-    autoloadStatus.remaining_ms = autoloadStatus.remaining * 1000;
     if (autoloadStatus.remaining === 0) {
-      autoloadStatus.current = seqEntries[0] || 'DONE';
-      logs.push(`[PLDMGR] Autoload sequence started: ${autoloadStatus.current}`);
+      autoloadStatus.current = autoloadList[0];
+      logs.push(`[PLDMGR] Autoload sequence started: ${autoloadList[0]}`);
     }
   } else if (autoloadStatus.remaining === 0 && autoloadStatus.current !== "DONE" && autoloadStatus.current !== "IDLE") {
     simulationTicks++;
@@ -169,7 +114,7 @@ setInterval(() => {
       simulationTicks = 0;
       autoloadStatus.done++;
       if (autoloadStatus.done < autoloadStatus.total) {
-        autoloadStatus.current = seqEntries[autoloadStatus.done];
+        autoloadStatus.current = autoloadList[autoloadStatus.done];
         logs.push(`[PLDMGR] Autoloading: ${autoloadStatus.current}`);
       } else {
         autoloadStatus.current = "DONE";
@@ -189,31 +134,20 @@ app.get('/version', (req, res) => {
   res.send('1.0.2-mock');
 });
 
-app.get('/system_info', (req, res) => {
-  // Simulate a console on FW 10.20 -> payloads with max_fw < 10.20 are incompatible.
-  res.json({ fw: '10.20' });
-});
-
 app.get('/list_payloads', (req, res) => {
   res.json({
     payloads: [
       "/data/pldmgr/goldhen_v2.4b17.elf",
       "/data/pldmgr/etaHEN_1.8.elf",
-      "/data/pldmgr/kstuff_v1.10.elf",
+      "/data/pldmgr/kstuff.elf",
       "/mnt/usb0/pldmgr/linux_loader.elf"
     ],
     meta: {
       // payloads with no entry here = local/direct upload (no badge shown)
-      "goldhen_v2.4b17.elf": { display_name: "GoldHEN", version: "v2.4b17", min_fw: "1.00", max_fw: "7.61" },
-      "etaHEN_1.8.elf": { display_name: "etaHEN", version: "1.8", min_fw: "1.00", max_fw: "10.20" },
-      // installed EchoStretch KStuff Lite v1.10 (name "KStuff")
-      "kstuff_v1.10.elf": {
-        display_name: "KStuff",
-        source_name: "Official Repository",
+      "kstuff.elf": {
+        source_name: "Community Payloads",
         install_source: "repository",
-        version: "v1.10",
-        min_fw: "1.00",
-        max_fw: "10.20"
+        install_source_detail: "https://example.com/community-payloads.json"
       }
     }
   });
@@ -225,6 +159,7 @@ app.get('/autoload_status', (req, res) => {
 
 app.get('/get_config', (req, res) => {
   res.json({
+    AUTOLOAD_RETURN_TO_DASHBOARD: false,
     AUTOLOAD_ENABLED: true,
     AUTOLOAD_LIST: "goldhen_v2.4b17.elf,etaHEN_1.8.elf",
     LAST_REPOSITORY_UPDATE: lastRepositoryUpdate,
@@ -233,6 +168,13 @@ app.get('/get_config', (req, res) => {
   });
 });
 
+app.get('/repository_icons', (req, res) => {
+  const items = req.query.source === 'default' ? remoteRepository : req.query.source === 'source_community' ? communityRepository : null;
+  if (!items) return res.status(404).json({ icons: {} });
+  res.json({ icons: req.query.source === 'default' ? remoteIcons : {} });
+});
+app.post('/repository_cache_clear', (req, res) => res.json({ ok: true }));
+
 app.get('/repository_payloads', (req, res) => {
   // Return source-grouped format (multi-source mode always on in mock)
   res.json({
@@ -240,22 +182,26 @@ app.get('/repository_payloads', (req, res) => {
       {
         id: 'default',
         name: 'Official Repository',
+        url: 'http://localhost:8081/test_repo.json',
         last_update: lastRepositoryUpdate,
         error: false,
+        icons_revision: 'mock-icons-v1',
         payloads: remoteRepository.map(p => ({ ...p, source_id: 'default', source_name: 'Official Repository' }))
       },
       {
         id: 'source_community',
         name: 'Community Payloads',
+        url: 'https://example.com/community-payloads.json',
         last_update: lastRepositoryUpdate,
         error: false,
+        icons_revision: 'mock-icons-v1',
         payloads: communityRepository.map(p => ({ ...p, source_id: 'source_community', source_name: 'Community Payloads' }))
       }
     ]
   });
 });
 
-app.get('/repository_refresh', (req, res) => {
+app.post('/repository_refresh', (req, res) => {
   lastRepositoryUpdate = Math.floor(Date.now() / 1000);
   logs.push(`[PLDMGR] Repository manually refreshed`);
   res.json({
@@ -263,15 +209,19 @@ app.get('/repository_refresh', (req, res) => {
       {
         id: 'default',
         name: 'Official Repository',
+        url: 'http://localhost:8081/test_repo.json',
         last_update: lastRepositoryUpdate,
         error: false,
+        icons_revision: 'mock-icons-v1',
         payloads: remoteRepository.map(p => ({ ...p, source_id: 'default', source_name: 'Official Repository' }))
       },
       {
         id: 'source_community',
         name: 'Community Payloads',
+        url: 'https://example.com/community-payloads.json',
         last_update: lastRepositoryUpdate,
         error: false,
+        icons_revision: 'mock-icons-v1',
         payloads: communityRepository.map(p => ({ ...p, source_id: 'source_community', source_name: 'Community Payloads' }))
       }
     ]
@@ -291,7 +241,7 @@ app.post('/sources_set', (req, res) => {
   res.send('OK');
 });
 
-app.get('/sources_add', (req, res) => {
+app.post('/sources_add', (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).json({ ok: false, message: 'Missing url' });
   // Mock: always succeed with a fake source name derived from the URL
@@ -302,7 +252,7 @@ app.get('/sources_add', (req, res) => {
   res.json({ ok: true, name: fakeName });
 });
 
-app.get('/sources_remove', (req, res) => {
+app.post('/sources_remove', (req, res) => {
   const idx = parseInt(req.query.index);
   if (isNaN(idx) || idx <= 0 || idx >= mockSources.length) {
     return res.status(400).json({ ok: false, message: 'Invalid index or cannot remove default source' });
@@ -312,7 +262,7 @@ app.get('/sources_remove', (req, res) => {
   res.json({ ok: true, message: 'OK' });
 });
 
-app.get('/repository_install', (req, res) => {
+app.post('/repository_install', (req, res) => {
   const { filename } = req.query;
   if (!filename) {
     return res.status(400).json({ ok: false, message: 'Missing filename' });
@@ -327,99 +277,55 @@ app.post('/set_config', (req, res) => {
   res.send('OK');
 });
 
-// --- Profiles ---
-app.get('/profiles_get', (req, res) => {
-  res.json({ profiles: mockProfiles });
-});
-
-app.post('/profiles_set', (req, res) => {
-  if (Array.isArray(req.body.profiles)) {
-    // Enforce at-most-one-enabled, like the backend.
-    let seen = false;
-    mockProfiles = req.body.profiles.map(p => {
-      const enabled = (p.enabled === true || p.enabled === 'true') && !seen;
-      if (enabled) seen = true;
-      return { id: p.id, name: p.name, enabled, list: p.list || '' };
-    });
-    logs.push(`[PLDMGR] Profiles updated: ${mockProfiles.length} profiles`);
-  }
-  res.send('OK');
-});
-
-// --- Startup payloads (always-run list) ---
-let mockStartup = [];
-app.get('/startup_get', (req, res) => res.json({ startup: mockStartup }));
-app.get('/startup_toggle', (req, res) => {
-  const f = req.query.filename;
-  const en = req.query.enabled === '1';
-  if (f) {
-    mockStartup = en ? Array.from(new Set([...mockStartup, f])) : mockStartup.filter(x => x !== f);
-    logs.push(`[PLDMGR] Startup ${en ? 'enabled' : 'disabled'}: ${f}`);
-  }
-  res.json({ ok: !!f });
-});
-
-app.get('/profile_run', (req, res) => {
-  const id = req.query.id;
-  const p = mockProfiles.find(x => x.id === id);
-  if (!p) return res.status(400).json({ ok: false });
-  logs.push(`[PLDMGR] Manual run: ${p.name}`);
-  startSequence(p.list, false); // run immediately, no countdown
-  res.json({ ok: true });
-});
-
-app.get(/^\/loadpayload:(.*)/, (req, res) => {
+app.post(/^\/loadpayload:(.*)/, (req, res) => {
   const path = req.params[0];
   logs.push(`[PLDMGR] Executing payload: ${path}`);
   res.send('OK');
 });
 
-app.get('/manage\\:delete', (req, res) => {
+app.post('/manage\\:delete', (req, res) => {
   const filename = req.query.filename;
   logs.push(`[PLDMGR] Deleted payload: ${filename}`);
   res.send('OK');
 });
 
-app.get('/manage\\:check', (req, res) => {
-  const filename = (req.query.filename || '').toLowerCase();
-  // Simulate: a different version of kstuff-lite is already installed.
-  const folderExists = filename.includes('kstuff-lite');
-  res.json({ status: 'ok', folder_exists: folderExists, file_exists: false, folder_name: 'kstuff-lite' });
-});
-
 app.post('/manage\\:upload', (req, res) => {
   const filename = req.query.filename;
-  const keep = req.query.keep === '1';
-  logs.push(`[PLDMGR] Uploaded payload: ${filename}${keep ? ' (keep both)' : ''}`);
+  logs.push(`[PLDMGR] Uploaded payload: ${filename}`);
   res.send('OK');
 });
 
-app.get('/abort', (req, res) => {
+app.post('/abort', (req, res) => {
   logs.push(`[PLDMGR] Autoload sequence aborted by user`);
   autoloadStatus.remaining = -1;
-  autoloadStatus.remaining_ms = -1000;
   autoloadStatus.current = "IDLE";
-  autoloadStatus.picker = false;
   res.send('OK');
 });
 
-app.get('/autoload_clear', (req, res) => {
+app.post('/autoload_clear', (req, res) => {
   logs.push(`[PLDMGR] Autoload status cleared`);
   autoloadStatus.done = 0;
   autoloadStatus.current = "IDLE";
   autoloadStatus.remaining = -1;
-  autoloadStatus.remaining_ms = -1000;
-  autoloadStatus.picker = false;
   res.send('OK');
 });
 
-app.get('/shutdown', (req, res) => {
+app.post('/shutdown', (req, res) => {
   logs.push(`[PLDMGR] System shutdown requested`);
   res.send('Shutting down...');
   process.exit(0);
 });
 
 // SSE for logs
+app.get('/processes_list', (req, res) => res.json([]));
+app.get('/history_list', (req, res) => res.json([]));
+app.post('/process_kill', (req, res) => res.json({ ok: true }));
+app.get('/usb_move_check', (req, res) => res.json({
+  status: 'ready', path: req.query.path, filename: path.basename(req.query.path || 'test.elf'),
+  folder_exists: false, existing: null,
+}));
+app.post('/usb_move_perform', (req, res) => res.json({ ok: true, message: 'Mock import complete' }));
+
 app.get('/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');

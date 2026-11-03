@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Terminal, ChevronRight, Globe, Languages } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../../utils/helpers'
+import { LANGUAGE_NAMES } from '../../utils/localeSupport'
 
 const FOLLOW_BROWSER_LANGUAGE = '__auto__'
 
@@ -40,26 +41,32 @@ const SettingRow = ({ title, description, children, icon: Icon, vertical }) => (
   </div>
 )
 
-const SettingsView = ({ config, onSaveConfig, setShowLogs, onNavigate }) => {
+const SettingsView = ({ config, onSaveConfig, setShowLogs, onNavigate, onClearCache }) => {
   const { t, i18n } = useTranslation()
+  const showDashboardIcons = config.SHOW_DASHBOARD_ICONS !== false
   const autoOpen = config.AUTO_BROWSER_OPEN !== false
+  const killDiscPlayer = config.KILL_DISC_PLAYER_ON_STARTUP !== false
   const autoInstall = config.AUTO_INSTALL_APP !== false
-  const autoloadDelay = config.AUTOLOAD_DELAY || 5
+  const autoloadReturn = config.AUTOLOAD_RETURN_TO_DASHBOARD === true
+  const autoloadDelay = config.AUTOLOAD_DELAY ?? 5
   const multiSources = config.MULTI_SOURCES_ENABLED === true
   const [followBrowserLanguage, setFollowBrowserLanguage] = useState(isFollowingBrowserLanguage)
 
-  const getLanguageDisplayName = (lang) => {
-    let displayName = lang;
+  const [clearingCache, setClearingCache] = useState(false)
+  const [cacheMessage, setCacheMessage] = useState('')
+  const handleClearCache = async () => {
+    if (clearingCache) return
+    setClearingCache(true)
+    setCacheMessage('')
     try {
-      const baseLang = lang.split('-')[0];
-      const lookupLang = lang.startsWith('zh') ? lang : baseLang;
-      displayName = new Intl.DisplayNames([lang], { type: 'language' }).of(lookupLang);
-      displayName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
+      await onClearCache()
+      setCacheMessage(t('settings.cache_cleared', 'Repository cache cleared.'))
     } catch {
-      return lang;
-    }
-    return displayName;
-  };
+      setCacheMessage(t('settings.cache_failed', 'Could not clear repository cache.'))
+    } finally { setClearingCache(false) }
+  }
+
+  const getLanguageDisplayName = lang => LANGUAGE_NAMES[lang] || lang;
 
   const currentLang = i18n.resolvedLanguage || i18n.language || 'en';
   const selectedLanguage = followBrowserLanguage ? FOLLOW_BROWSER_LANGUAGE : currentLang;
@@ -125,6 +132,28 @@ const SettingsView = ({ config, onSaveConfig, setShowLogs, onNavigate }) => {
           </SettingRow>
 
           <SettingRow
+            title={t("settings.dashboard_icons_title", "Dashboard Payload Icons")}
+            description={t("settings.dashboard_icons_desc", "Show payload icons on the dashboard. Hiding them leaves more space for text.")}
+          >
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showDashboardIcons}
+              aria-label={t("settings.dashboard_icons_title", "Dashboard Payload Icons")}
+              onClick={() => onSaveConfig({ SHOW_DASHBOARD_ICONS: !showDashboardIcons })}
+              className={cn(
+                "w-14 h-7 md:w-20 md:h-10 rounded-full transition-all relative p-1 md:p-1.5",
+                showDashboardIcons ? "bg-ps-blue" : "bg-white/10"
+              )}
+            >
+              <div className={cn(
+                "w-5 h-5 md:w-7 md:h-7 bg-white rounded-full transition-all",
+                showDashboardIcons ? "translate-x-7 md:translate-x-10" : "translate-x-0"
+              )} />
+            </button>
+          </SettingRow>
+
+          <SettingRow
             title={t("settings.auto_open_title", "Auto-open Browser")}
             description={t("settings.auto_open_desc", "Automatically launch the browser when Payload Manager payload is executed.")}
           >
@@ -165,15 +194,15 @@ const SettingsView = ({ config, onSaveConfig, setShowLogs, onNavigate }) => {
             description={t("settings.kill_disc_desc", "Automatically terminate the Disc Player application on startup (for BD-JB users).")}
           >
             <button
-              onClick={() => onSaveConfig({ KILL_DISC_PLAYER_ON_STARTUP: !config.KILL_DISC_PLAYER_ON_STARTUP })}
+              onClick={() => onSaveConfig({ KILL_DISC_PLAYER_ON_STARTUP: !killDiscPlayer })}
               className={cn(
                 "w-14 h-7 md:w-20 md:h-10 rounded-full transition-all relative p-1 md:p-1.5",
-                config.KILL_DISC_PLAYER_ON_STARTUP !== false ? "bg-ps-blue" : "bg-white/10"
+                killDiscPlayer ? "bg-ps-blue" : "bg-white/10"
               )}
             >
               <div className={cn(
                 "w-5 h-5 md:w-7 md:h-7 bg-white rounded-full transition-all",
-                config.KILL_DISC_PLAYER_ON_STARTUP !== false ? "translate-x-7 md:translate-x-10" : "translate-x-0"
+                killDiscPlayer ? "translate-x-7 md:translate-x-10" : "translate-x-0"
               )} />
             </button>
           </SettingRow>
@@ -192,6 +221,28 @@ const SettingsView = ({ config, onSaveConfig, setShowLogs, onNavigate }) => {
               <div className={cn(
                 "w-5 h-5 md:w-7 md:h-7 bg-white rounded-full transition-all",
                 config.SCAN_USB_PAYLOADS ? "translate-x-7 md:translate-x-10" : "translate-x-0"
+              )} />
+            </button>
+          </SettingRow>
+
+          <SettingRow
+            title={t("settings.autoload_return_title", "Return After Autoload")}
+            description={t("settings.autoload_return_desc", "Automatically return to the dashboard 3 seconds after all payloads load successfully.")}
+          >
+            <button
+              type="button"
+              role="switch"
+              aria-checked={autoloadReturn}
+              aria-label={t("settings.autoload_return_title", "Return After Autoload")}
+              onClick={() => onSaveConfig({ AUTOLOAD_RETURN_TO_DASHBOARD: !autoloadReturn })}
+              className={cn(
+                "w-14 h-7 md:w-20 md:h-10 rounded-full transition-all relative p-1 md:p-1.5",
+                autoloadReturn ? "bg-ps-blue" : "bg-white/10"
+              )}
+            >
+              <div className={cn(
+                "w-5 h-5 md:w-7 md:h-7 bg-white rounded-full transition-all",
+                autoloadReturn ? "translate-x-7 md:translate-x-10" : "translate-x-0"
               )} />
             </button>
           </SettingRow>
@@ -250,6 +301,19 @@ const SettingsView = ({ config, onSaveConfig, setShowLogs, onNavigate }) => {
                 multiSources ? "translate-x-7 md:translate-x-10" : "translate-x-0"
               )} />
             </button>
+          </SettingRow>
+
+          <SettingRow
+            title={t('settings.cache_title', 'Repository Cache')}
+            description={t('settings.cache_desc', 'Clear downloaded catalogs and icons, then fetch fresh copies. Installed payloads and your settings are preserved.')}
+            icon={Globe}
+            vertical
+          >
+            <button onClick={handleClearCache} disabled={clearingCache}
+              className="px-5 py-3 rounded-xl bg-white/10 hover:bg-ps-blue/20 disabled:opacity-50 font-bold">
+              {clearingCache ? t('settings.cache_clearing', 'Clearing…') : t('settings.cache_clear', 'Clear Cache')}
+            </button>
+            {cacheMessage && <p role="status" className="mt-3 text-sm text-zinc-400">{cacheMessage}</p>}
           </SettingRow>
 
           {multiSources && (
