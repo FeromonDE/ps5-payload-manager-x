@@ -14,6 +14,8 @@
 #include "json_helpers.h"
 #include "slot.h"
 #include "ps5_launcher.h"
+#include "profiles.h"
+#include "utils.h"
 
 #ifndef PLDMGR_FRONTEND_WAIT_MS
 #define PLDMGR_FRONTEND_WAIT_MS 5000
@@ -33,6 +35,33 @@ static long long countdown_end, entry_delay_end;
 static AutoloadSnapshot status = {.state=AUTOLOAD_DISABLED, .remaining=-1, .remaining_ms=-1000,.entry_index=-1};
 
 typedef struct { char key[MAX_ENTRY_TEXT + 1]; int delay_ms; } SequenceEntry;
+
+/* ── Fork: profiles / picker / startup ───────────────────────────────────────
+ * The worker reads its sequence from `sequence_path`. For the no-profile default
+ * it stays AUTOLOAD_CONFIG_PATH (upstream's meaning), so upstream behaviour and
+ * host tests are unchanged; for a profile it points at the resolved scratch file.
+ * `picker_active` means "profiles exist but none enabled" (frontend shows the
+ * selection); `forced_run` means run the resolved sequence now with no countdown.
+ * launched_bases dedups across startup + sequence so a payload never double-launches. */
+static const char *sequence_path = AUTOLOAD_CONFIG_PATH;
+static volatile int picker_active = 0;
+static volatile int forced_run = 0;
+#define MAX_LAUNCHED 64
+static char launched_bases[MAX_LAUNCHED][128];
+static int launched_count = 0;
+static void launched_reset(void) { launched_count = 0; }
+static int launched_has(const char *base) {
+    for (int i = 0; i < launched_count; i++)
+        if (strcmp(launched_bases[i], base) == 0) return 1;
+    return 0;
+}
+static void launched_add(const char *base) {
+    if (launched_count < MAX_LAUNCHED) {
+        strncpy(launched_bases[launched_count], base, sizeof(launched_bases[0]) - 1);
+        launched_bases[launched_count][sizeof(launched_bases[0]) - 1] = '\0';
+        launched_count++;
+    }
+}
 
 static long long now_ms(void) {
     struct timespec time;
@@ -101,7 +130,7 @@ static int wait_until(long long end, int waiting_frontend) {
  * not a second pass with different whitespace/delay rules or a newer file. */
 static int read_sequence(SequenceEntry **out, size_t *count, char list[4096]) {
     *out=NULL; *count=0; list[0]=0;
-    int fd=open(AUTOLOAD_CONFIG_PATH,O_RDONLY|O_NONBLOCK);
+    int fd=open(sequence_path,O_RDONLY|O_NONBLOCK);
     if (fd<0) return errno==ENOENT ? 1 : -1;
     struct stat info;
     if (fstat(fd,&info) || !S_ISREG(info.st_mode) || info.st_size<0 || info.st_size>MAX_SEQUENCE_TEXT) {
@@ -174,12 +203,86 @@ static void finish(AutoloadState state) {
     pthread_cond_broadcast(&state_cond);
     pthread_mutex_unlock(&state_mutex);
 }
+/* Launch the always-run startup payloads (startup.txt) silently in the
+ * background, honouring "!ms" delays and skipping duplicates. They are not shown
+ * as an autoload sequence; they run before any profile/countdown. Abortable. */
+static void launch_startup_payloads(void) {
+    FILE *f = fopen(STARTUP_LIST_PATH, "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (line[0] == '\0') continue;
+        if (line[0] == '!') {
+            int delay = atoi(line + 1);
+            if (delay > 0) {
+                pldmgr_log("[Autoload] Startup delay %d ms...\n", delay);
+                if (wait_until(now_ms() + delay, 0)) break;
+            }
+            continue;
+        }
+        if (cancelled(NULL)) break;
+        if (is_pldmgr_name(line)) continue;
+        char base[128];
+        pldmgr_utils_get_payload_folder_name(line, base, sizeof(base));
+        if (launched_has(base)) { pldmgr_log("[Autoload] Startup: already launched %s\n", line); continue; }
+        char path[512];
+        if (slot_resolve(line, path, sizeof(path)) == 0 && !is_pldmgr_name(path)) {
+            pldmgr_log("[Autoload] Launching (startup): %s\n", path);
+            ps5_launch_elf_cancellable(path, cancelled, NULL);
+            launched_add(base);
+            if (wait_until(now_ms() + 500, 0)) break; /* launch spacing; abortable */
+        } else {
+            pldmgr_log("[Autoload] Startup payload not found: %s\n", line);
+        }
+    }
+    fclose(f);
+}
+
 static void *autoload_worker(void *argument) {
     (void)argument;
     SequenceEntry *entries=NULL; size_t count=0;
     char list[4096]={0};
     PldmgrConfig cfg; config_read(&cfg);
     if (!cfg.autoload_enabled) { finish(AUTOLOAD_DISABLED); return NULL; }
+
+    /* ── Fork: resolve what to run (manual profile / enabled profile / picker /
+     * upstream default), then launch always-run startup payloads. The no-profile,
+     * no-startup, non-forced path leaves sequence_path = AUTOLOAD_CONFIG_PATH and
+     * launches nothing, so it is byte-identical to upstream. ─────────────────── */
+    launched_reset();
+    int forced = forced_run;
+    forced_run = 0;
+    if (forced) {
+        /* run_profile() already wrote PROFILE_SCRATCH_PATH; run it now with no
+         * countdown and no browser wait. Startup payloads already ran at boot. */
+        sequence_path = PROFILE_SCRATCH_PATH;
+        cfg.autoload_delay = 0;
+        cfg.auto_browser_open = 0;
+    } else {
+        picker_active = 0;
+        ProfileEntry *arr = calloc(MAX_PROFILES, sizeof(ProfileEntry));
+        int pcount = 0, active = -1;
+        if (arr) { profiles_load(arr, &pcount); active = profiles_active_index(arr, pcount); }
+        if (active >= 0) {
+            profiles_write_sequence(arr[active].list);
+            sequence_path = PROFILE_SCRATCH_PATH;
+            pldmgr_log("[Autoload] Enabled profile: %s\n", arr[active].name);
+        } else if (pcount > 0) {
+            picker_active = 1; /* set before startup so the status poll keeps the picker visible */
+            pldmgr_log("[Autoload] No enabled profile - startup picker (%d profiles).\n", pcount);
+        } else {
+            sequence_path = AUTOLOAD_CONFIG_PATH; /* upstream default sequence */
+        }
+        if (arr) free(arr);
+
+        launch_startup_payloads();
+
+        /* Picker: do not run a sequence; stay idle so the frontend can offer the
+         * selection. run_profile() takes over when the user picks one. */
+        if (picker_active) { finish(AUTOLOAD_DISABLED); return NULL; }
+    }
+
     int parsed=read_sequence(&entries,&count,list);
     if (parsed) {
         if (parsed<0) pldmgr_log("[Autoload] Invalid or unreadable sequence; no payloads launched.\n");
@@ -275,12 +378,16 @@ static void *autoload_worker(void *argument) {
         pthread_mutex_unlock(&state_mutex);
         int skipped=0, failed=0;
         char path[512];
+        char base[128];
+        pldmgr_utils_get_payload_folder_name(entry->key, base, sizeof(base));
         if (is_pldmgr_name(entry->key)) skipped=1;
+        else if (launched_has(base)) { skipped=1; pldmgr_log("[Autoload] Skipping already-launched: %s\n", entry->key); }
         else if (slot_resolve(entry->key,path,sizeof(path))) failed=1;
         else if (is_pldmgr_name(path)) skipped=1;
         else {
             pldmgr_log("[Autoload] Launching: %s\n",path);
             if (ps5_launch_elf_cancellable(path,cancelled,NULL)) failed=1;
+            else launched_add(base);
         }
         if (skipped) pldmgr_log("[Autoload] Skipping self: %s\n",entry->key);
         if (failed) pldmgr_log("[Autoload] Missing, failed or cancelled payload: %s\n",entry->key);
@@ -340,4 +447,102 @@ int pldmgr_autoload_update_config_entry(const char *old_key,const char *new_key)
     int result=config_update_list_entry(AUTOLOAD_CONFIG_PATH,old_key,new_key);
     if (result) pldmgr_log("[Autoload] Failed to update entry: %s\n",old_key ? old_key : "");
     return result;
+}
+
+/* ── Fork: profiles / picker / startup ─────────────────────────────────── */
+
+int pldmgr_autoload_is_picker(void) { return picker_active; }
+
+void pldmgr_autoload_get_list(char *buf, size_t size) {
+    if (!buf || !size) return;
+    AutoloadSnapshot s;
+    pldmgr_autoload_get_snapshot(&s);
+    strncpy(buf, s.list, size - 1);
+    buf[size - 1] = '\0';
+}
+
+int pldmgr_autoload_run_profile(const char *id) {
+    if (!id || !id[0]) return -1;
+    ProfileEntry *arr = calloc(MAX_PROFILES, sizeof(ProfileEntry));
+    if (!arr) return -1;
+    int count = 0;
+    profiles_load(arr, &count);
+    int idx = profiles_find_by_id(arr, count, id);
+    if (idx < 0) { free(arr); return -1; }
+    int rc = profiles_write_sequence(arr[idx].list);
+    free(arr);
+    if (rc != 0) return -1;
+    /* Stop the finished/idle boot worker, then run the resolved sequence now
+     * (forced => no countdown). stop() joins; start() spawns a fresh worker. */
+    pldmgr_autoload_stop();
+    picker_active = 0;
+    forced_run = 1;
+    rc = pldmgr_autoload_start();
+    if (rc != 0) forced_run = 0;
+    return rc;
+}
+
+/* ── Fork: always-run startup payloads (startup.txt) ───────────────────── */
+
+int pldmgr_startup_is_enabled(const char *filename) {
+    if (!filename) return 0;
+    FILE *f = fopen(STARTUP_LIST_PATH, "r");
+    if (!f) return 0;
+    char line[256];
+    int found = 0;
+    while (fgets(line, sizeof(line), f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (strcmp(line, filename) == 0) { found = 1; break; }
+    }
+    fclose(f);
+    return found;
+}
+
+void pldmgr_startup_set(const char *filename, int enabled) {
+    if (!filename || !filename[0]) return;
+    /* Read existing entries (excluding the target). */
+    char entries[MAX_LAUNCHED][256];
+    int n = 0;
+    FILE *f = fopen(STARTUP_LIST_PATH, "r");
+    if (f) {
+        char line[256];
+        while (n < MAX_LAUNCHED && fgets(line, sizeof(line), f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (line[0] == '\0') continue;
+            if (strcmp(line, filename) == 0) continue; /* drop target; re-added below if enabling */
+            strncpy(entries[n], line, sizeof(entries[0]) - 1);
+            entries[n][sizeof(entries[0]) - 1] = '\0';
+            n++;
+        }
+        fclose(f);
+    }
+    ensure_dir_recursive(BASE_DATA_DIR);
+    f = fopen(STARTUP_LIST_PATH, "w");
+    if (!f) return;
+    for (int i = 0; i < n; i++) fprintf(f, "%s\n", entries[i]);
+    if (enabled) fprintf(f, "%s\n", filename);
+    fclose(f);
+    pldmgr_log("[Startup] %s %s\n", filename, enabled ? "enabled" : "disabled");
+}
+
+int pldmgr_startup_list_json(char *buf, size_t size) {
+    JsonListBuilder jb = { buf, size, 0, 1, 0 };
+    buf[0] = '\0';
+    json_append(&jb, "{\"startup\":[");
+    FILE *f = fopen(STARTUP_LIST_PATH, "r");
+    if (f) {
+        char line[256];
+        int first = 1;
+        while (fgets(line, sizeof(line), f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (line[0] == '\0') continue;
+            char esc[512];
+            json_escape_checked(&jb, line, esc, sizeof(esc));
+            json_append(&jb, "%s\"%s\"", first ? "" : ",", esc);
+            first = 0;
+        }
+        fclose(f);
+    }
+    json_append(&jb, "]}");
+    return 0;
 }

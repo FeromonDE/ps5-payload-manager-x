@@ -34,3 +34,28 @@ int pldmgr_autoload_get_remaining_seconds(void);
 long long pldmgr_autoload_get_remaining_ms(void);
 void pldmgr_autoload_get_status(int *total, int *done, char *current);
 int pldmgr_autoload_update_config_entry(const char *old_filename, const char *new_filename);
+
+/* ── Fork: autoload profiles ────────────────────────────────────────────────
+ * A profile is a named autoload sequence (profiles.json). At most one may be
+ * "enabled" and auto-runs on boot; if profiles exist but none is enabled the
+ * manager boots into "picker" mode so the frontend shows a startup selection
+ * instead of auto-running anything. Built on upstream's worker: the resolved
+ * profile sequence is executed through the same countdown/launch machinery. */
+
+/* 1 when booted into picker mode (profiles present, none enabled). Cleared once
+ * a profile is run or the selection is dismissed. */
+int pldmgr_autoload_is_picker(void);
+
+/* Run a specific profile immediately (no startup countdown), regardless of which
+ * profile is enabled. Used when the user picks one from the startup selection.
+ * Returns 0 on success, -1 if the profile id is unknown. */
+int pldmgr_autoload_run_profile(const char *id);
+
+/* Comma-separated list of payloads for the overlay's current phase. */
+void pldmgr_autoload_get_list(char *buf, size_t size);
+
+/* ── Fork: always-run startup payloads (startup.txt) ────────────────────────
+ * Launched silently on every boot, independent of the active/selected profile. */
+int pldmgr_startup_is_enabled(const char *filename);
+void pldmgr_startup_set(const char *filename, int enabled);
+int pldmgr_startup_list_json(char *buf, size_t size);

@@ -20,6 +20,7 @@
 #include "log_server.h"
 #include "config.h"
 #include "payload_mgr.h"
+#include "profiles.h"
 #include "repository.h"
 #include "sha256.h"
 #include "sources.h"
@@ -64,7 +65,8 @@ static int is_mutation_route(const char *url) {
     const char *routes[] = { ROUTE_UPLOAD, ROUTE_DELETE, ROUTE_SHUTDOWN,
         ROUTE_SET_CONFIG, ROUTE_ABORT, ROUTE_AUTOLOAD_CLEAR, ROUTE_REPO_REFRESH,
         ROUTE_REPO_INSTALL, ROUTE_SOURCES_SET, ROUTE_SOURCES_ADD,
-        ROUTE_SOURCES_REMOVE, ROUTE_REPO_CACHE_CLEAR, ROUTE_USB_MOVE_PERFORM, ROUTE_PROCESS_KILL };
+        ROUTE_SOURCES_REMOVE, ROUTE_REPO_CACHE_CLEAR, ROUTE_USB_MOVE_PERFORM, ROUTE_PROCESS_KILL,
+        ROUTE_PROFILES_SET, ROUTE_PROFILE_RUN, ROUTE_STARTUP_SET };
     for (size_t i = 0; i < sizeof(routes)/sizeof(routes[0]); i++)
         if (!strcmp(url, routes[i])) return 1;
     return !strncmp(url, ROUTE_LOAD_PAYLOAD, strlen(ROUTE_LOAD_PAYLOAD));
@@ -211,7 +213,7 @@ struct UploadStatus {
     char mode[32];
 };
 
-enum RequestKind { REQUEST_CONFIG, REQUEST_SOURCES, REQUEST_UPLOAD, REQUEST_ACTION };
+enum RequestKind { REQUEST_CONFIG, REQUEST_SOURCES, REQUEST_UPLOAD, REQUEST_ACTION, REQUEST_PROFILES };
 
 struct RequestContext {
     enum RequestKind kind;
@@ -460,14 +462,15 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
         int upload = strcmp(url, ROUTE_UPLOAD) == 0;
         int config = strcmp(url, ROUTE_SET_CONFIG) == 0 && strcmp(method, "POST") == 0;
         int sources = strcmp(url, ROUTE_SOURCES_SET) == 0 && strcmp(method, "POST") == 0;
-        if (upload || config || sources || mutation) {
+        int profiles = strcmp(url, ROUTE_PROFILES_SET) == 0 && strcmp(method, "POST") == 0;
+        if (upload || config || sources || profiles || mutation) {
             struct RequestContext *request = malloc(sizeof(*request));
             if (!request) {
                 *con_cls = REQUEST_MARKER;
                 return send_out_of_memory(conn);
             }
             memset(request, 0, sizeof(*request));
-            request->kind = upload ? REQUEST_UPLOAD : (config ? REQUEST_CONFIG : (sources ? REQUEST_SOURCES : REQUEST_ACTION));
+            request->kind = upload ? REQUEST_UPLOAD : (config ? REQUEST_CONFIG : (sources ? REQUEST_SOURCES : (profiles ? REQUEST_PROFILES : REQUEST_ACTION)));
             *con_cls = request;
             unsigned int error;
             if (upload) {
@@ -514,8 +517,9 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
             }
             if (!post->size)
                 return finish_request_error(conn, request, MHD_HTTP_BAD_REQUEST);
-            int rc = request->kind == REQUEST_CONFIG
-                ? config_handle_set_json(post->data) : sources_save(post->data, post->size);
+            int rc = request->kind == REQUEST_CONFIG ? config_handle_set_json(post->data)
+                   : request->kind == REQUEST_PROFILES ? profiles_save_raw(post->data, post->size)
+                   : sources_save(post->data, post->size);
             if (rc != 0)
                 return finish_request_error(conn, request, rc == CONFIG_INVALID ? MHD_HTTP_BAD_REQUEST : MHD_HTTP_INTERNAL_SERVER_ERROR);
             request->finished = 1;
@@ -998,11 +1002,12 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
         json_format(resp_buf, SMALL_RESPONSE_BUFFER_SIZE,
                  "{\"remaining\":%d,\"remaining_ms\":%lld,\"total\":%d,\"done\":%d,\"current\":\"%s\","
                  "\"list\":\"%s\",\"delay\":%d,\"KILL_DISC_PLAYER_ON_STARTUP\":%s,\"SCAN_USB_PAYLOADS\":%s,"
-                 "\"state\":\"%s\",\"successful\":%d,\"failed\":%d,\"skipped\":%d,\"outcomes\":\"%s\",\"entry_index\":%d,\"entry_duration_ms\":%d,\"entry_remaining_ms\":%lld}",
+                 "\"state\":\"%s\",\"successful\":%d,\"failed\":%d,\"skipped\":%d,\"outcomes\":\"%s\",\"entry_index\":%d,\"entry_duration_ms\":%d,\"entry_remaining_ms\":%lld,\"picker\":%s}",
                  snapshot.remaining, snapshot.remaining_ms, snapshot.total, snapshot.done, current_escaped,
                  list_escaped, snapshot.delay, cfg.kill_disc_player ? "true" : "false", snapshot.scan_usb_payloads ? "true" : "false",
                  pldmgr_autoload_state_name(snapshot.state),snapshot.successful,snapshot.failed,snapshot.skipped,snapshot.outcomes,
-                 snapshot.entry_index,snapshot.entry_duration_ms,snapshot.entry_remaining_ms);
+                 snapshot.entry_index,snapshot.entry_duration_ms,snapshot.entry_remaining_ms,
+                 pldmgr_autoload_is_picker() ? "true" : "false");
         if (!resp_buf[0]) return send_serialization_error(conn, resp_buf);
         resp = create_buffer_response(strlen(resp_buf),
                                                (void *)resp_buf,
@@ -1020,6 +1025,40 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
         resp = create_buffer_response(strlen(msg), (void *)msg,
                                                MHD_RESPMEM_PERSISTENT);
         add_response_header(resp, "Content-Type", "text/plain");
+    } else if (strcmp(url, ROUTE_PROFILES_GET) == 0) {
+        char *resp_buf;
+        if (!alloc_response_buffer(&resp_buf)) return send_out_of_memory(conn);
+        profiles_list_json(resp_buf, RESPONSE_BUFFER_SIZE);
+        resp = create_buffer_response(strlen(resp_buf), (void *)resp_buf, MHD_RESPMEM_MUST_FREE);
+        add_response_header(resp, "Content-Type", "application/json");
+    } else if (strcmp(url, ROUTE_STARTUP_GET) == 0) {
+        char *resp_buf;
+        if (!alloc_response_buffer_small(&resp_buf)) return send_out_of_memory(conn);
+        pldmgr_startup_list_json(resp_buf, SMALL_RESPONSE_BUFFER_SIZE);
+        resp = create_buffer_response(strlen(resp_buf), (void *)resp_buf, MHD_RESPMEM_MUST_FREE);
+        add_response_header(resp, "Content-Type", "application/json");
+    } else if (strcmp(url, ROUTE_PROFILE_RUN) == 0) {
+        const char *id = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "id");
+        int rc = pldmgr_autoload_run_profile(id);
+        char json_resp[64];
+        snprintf(json_resp, sizeof(json_resp), "{\"ok\":%s}", rc == 0 ? "true" : "false");
+        resp = create_buffer_response(strlen(json_resp), (void *)json_resp, MHD_RESPMEM_MUST_COPY);
+        add_response_header(resp, "Content-Type", "application/json");
+        return send_response(conn, rc == 0 ? MHD_HTTP_OK : MHD_HTTP_BAD_REQUEST, resp);
+    } else if (strcmp(url, ROUTE_STARTUP_SET) == 0) {
+        const char *filename = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "filename");
+        const char *enabled_arg = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "enabled");
+        int ok = 0;
+        if (filename && filename[0] && !strstr(filename, "/") && !strstr(filename, "..")) {
+            int enabled = (enabled_arg && (enabled_arg[0] == '1' || enabled_arg[0] == 't')) ? 1 : 0;
+            pldmgr_startup_set(filename, enabled);
+            ok = 1;
+        }
+        char json_resp[64];
+        snprintf(json_resp, sizeof(json_resp), "{\"ok\":%s}", ok ? "true" : "false");
+        resp = create_buffer_response(strlen(json_resp), (void *)json_resp, MHD_RESPMEM_MUST_COPY);
+        add_response_header(resp, "Content-Type", "application/json");
+        return send_response(conn, ok ? MHD_HTTP_OK : MHD_HTTP_BAD_REQUEST, resp);
     } else if (strcmp(url, ROUTE_GET_CONFIG) == 0) {
         PldmgrConfig cfg;
         config_read(&cfg);

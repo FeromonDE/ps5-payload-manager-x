@@ -56,6 +56,12 @@
 #define ROUTE_ABORT "/abort"
 #define ROUTE_AUTOLOAD_STATUS "/autoload_status"
 #define ROUTE_AUTOLOAD_CLEAR "/autoload_clear"
+/* Fork: autoload profiles + always-run startup payloads. */
+#define ROUTE_PROFILES_GET "/profiles_get"
+#define ROUTE_PROFILES_SET "/profiles_set"
+#define ROUTE_PROFILE_RUN  "/profile_run"
+#define ROUTE_STARTUP_GET  "/startup_get"
+#define ROUTE_STARTUP_SET  "/startup_set"
 #define ROUTE_REPO_ICONS "/repository_icons"
 #define ROUTE_REPO_CACHE_CLEAR "/repository_cache_clear"
 #define ROUTE_REPO_LIST "/repository_payloads"
@@ -78,7 +84,16 @@
  * never conflict here. The fork's own version lives in include/version_x.h
  * (PLDMGRX_VERSION) and is shown as "based on vX". */
 #define MENU_VERSION "0.6.3"
+/* autoload.txt keeps upstream's meaning: the default/no-profile autoload
+ * sequence, edited by the autoload editor. The fork adds a profile layer on top. */
 #define AUTOLOAD_CONFIG_PATH PLDMGR_DATA_ROOT "/autoload.txt"
+/* Fork: autoload profiles. profiles.json holds named sequences (one may be
+ * "enabled" to auto-run); the enabled/selected profile is resolved into
+ * profile_run.txt, which the worker executes instead of autoload.txt. startup.txt
+ * is an always-run list launched silently on every boot, independent of profiles. */
+#define PROFILES_CONFIG_PATH PLDMGR_DATA_ROOT "/profiles.json"
+#define PROFILE_SCRATCH_PATH PLDMGR_DATA_ROOT "/profile_run.txt"
+#define STARTUP_LIST_PATH    PLDMGR_DATA_ROOT "/startup.txt"
 #define FAVORITES_CONFIG_PATH PLDMGR_DATA_ROOT "/favorites.txt"
 #define PLDMGR_CONFIG_PATH PLDMGR_DATA_ROOT "/pldmgr_config.txt"
 #define REPOSITORY_CACHE_PATH PLDMGR_DATA_ROOT "/repository_cache.json"

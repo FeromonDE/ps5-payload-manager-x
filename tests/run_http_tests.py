@@ -586,7 +586,7 @@ def main():
             extra_sources += ["src/autoload.c"]
             (storage / "pldmgr_config.txt").write_text("AUTOLOAD_ENABLED=1\nAUTO_BROWSER_OPEN=1\nAUTOLOAD_DELAY=5\n")
             (storage / "autoload.txt").write_text("local/running\n")
-        run(common + cflags + extra_sources + [str(object_file), "src/utils.c", "src/json_helpers.c", "tests/http_backend_stubs.c",
+        run(common + cflags + extra_sources + [str(object_file), "src/utils.c", "src/json_helpers.c", "src/profiles.c", "tests/http_backend_stubs.c",
                                "tests/http_responses_test.c", "-o", str(binary)] + flags)
         selected = ["--ownership-only"] if args.ownership_only else (["--oom-only"] if args.oom_only else [])
         if args.autoload_only:

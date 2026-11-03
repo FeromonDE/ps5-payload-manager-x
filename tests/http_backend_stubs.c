@@ -58,6 +58,11 @@ int pldmgr_autoload_get_remaining_seconds(void) { return -1; }
 long long pldmgr_autoload_get_remaining_ms(void) { return -1000; }
 void pldmgr_autoload_reset(void) { test_mutation_calls++; }
 void pldmgr_autoload_abort(void) { test_mutation_calls++; }
+/* Fork: profiles / picker / startup (real impls come from autoload.c when linked). */
+int pldmgr_autoload_is_picker(void) { return 0; }
+int pldmgr_autoload_run_profile(const char *id) { (void)id; test_mutation_calls++; return 0; }
+void pldmgr_startup_set(const char *filename, int enabled) { (void)filename; (void)enabled; test_mutation_calls++; }
+int pldmgr_startup_list_json(char *buf, size_t size) { if (buf && size) snprintf(buf, size, "{\"startup\":[]}"); return 0; }
 #endif
 #ifndef PLDMGR_TEST_REAL_LOGS
 int pldmgr_server_is_active(void) { return test_active_calls != 0; }

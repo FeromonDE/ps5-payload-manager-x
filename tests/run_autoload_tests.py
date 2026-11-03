@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix='pldmgr-autoload-') as temp:
     (build/'pldmgr.h').write_text((ROOT/'include/pldmgr.h').read_text().replace('/data/pldmgr',str(storage)))
     flags=shlex.split(os.environ.get('HOST_CC','clang'))+['-std=c11','-D_DEFAULT_SOURCE','-g','-O1','-Wall','-Wextra','-pthread','-ffunction-sections','-fdata-sections','-I'+str(build),'-Iinclude', '-DPLDMGR_FRONTEND_WAIT_MS=2000', '-fno-omit-frame-pointer', '-fsanitize=thread' if args.thread_sanitize else '-fsanitize=address,undefined']
     objects=[]
-    for name in ['autoload','config','json_helpers','utils']:
+    for name in ['autoload','config','json_helpers','utils','profiles']:
         source=f'src/{name}.c';extra=['-include','tests/autoload_hooks.h'] if name=='autoload' else []
         if args.legacy and name=='autoload':
             snapshot=build/'autoload_legacy.c'
