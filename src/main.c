@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include "pldmgr.h"
+#include "version_x.h"
 #include "config.h"
 #include "http_server.h"
 #include "repository.h"
@@ -41,7 +42,14 @@ static void handle_sigcont(int sig) { resume_flag = 1; }
 extern int sceNetCtlInit();
 extern int sceUserServiceInitialize(void *);
 
-__attribute__((used)) volatile const char pldmgr_version_sig[] = "PLDMGR_VER:" MENU_VERSION;
+/* Embedded self-update marker. The X build uses a DISTINCT marker
+ * ("PLDMGRX_VER:") and the FORK version so self-update only matches other X
+ * builds — never stock pldmgr ("PLDMGR_VER:" + upstream version). */
+#ifdef PLDMGRX
+__attribute__((used)) volatile const char pldmgr_version_sig[] = PLDMGR_SELF_MARKER PLDMGRX_VERSION;
+#else
+__attribute__((used)) volatile const char pldmgr_version_sig[] = PLDMGR_SELF_MARKER MENU_VERSION;
+#endif
 
 static struct MHD_Daemon *start_http_daemon(unsigned int port) {
     log_stream_start();
@@ -65,9 +73,9 @@ int main(int argc, char *argv[]) {
     unsigned short port = DEFAULT_PORT;
     pid_t pid;
 
-    syscall(SYS_thr_set_name, -1, "pldmgr.elf");
+    syscall(SYS_thr_set_name, -1, PLDMGR_PROC_NAME);
 
-    while ((pid = process_find_pid("pldmgr.elf")) > 0) {
+    while ((pid = process_find_pid(PLDMGR_PROC_NAME)) > 0) {
         if (kill(pid, SIGKILL)) {
             pldmgr_log("[PLDMGR] kill failed for pid %d\n", pid);
             break;
@@ -75,8 +83,8 @@ int main(int argc, char *argv[]) {
         sleep(1);
     }
 
-    pldmgr_log("[PLDMGR] Starting Payload Manager v%s on port %d...\n",
-               pldmgr_version_sig + 11, port);
+    pldmgr_log("[PLDMGR] Starting " PLDMGR_APP_NAME " v%s on port %d...\n",
+               PLDMGR_RUNNING_VERSION, port);
 
     if (slot_storage_recover() != 0) {
         pldmgr_log("[PLDMGR] Storage recovery failed; startup stopped to preserve payloads.\n");
@@ -147,10 +155,11 @@ int main(int argc, char *argv[]) {
 
     if (!cfg.auto_browser_open) {
         if (strcmp(current_ip, "unknown") != 0) {
-            pldmgr_notify("Payload Manager v%s\nIP: %s\nPort: %d", MENU_VERSION,
-                          current_ip, port);
+            pldmgr_notify(PLDMGR_APP_NAME " v%s\nIP: %s\nPort: %d",
+                          PLDMGR_VERSION_DISPLAY, current_ip, port);
         } else {
-            pldmgr_notify("Payload Manager v%s\nWaiting for Network...", MENU_VERSION);
+            pldmgr_notify(PLDMGR_APP_NAME " v%s\nWaiting for Network...",
+                          PLDMGR_VERSION_DISPLAY);
         }
     }
 

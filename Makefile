@@ -44,7 +44,34 @@ ICON_PNG_HEADER := include/assets_icon_png.h
 CFLAGS := -Os -Wall -ffunction-sections -fdata-sections $(INCLUDES)
 LDFLAGS := -Wl,--gc-sections
 
+# Fork (Payload Manager X) version — our own semver, independent of upstream's
+# MENU_VERSION. From git tags via tools/fork_version.sh (git describe of x-v*
+# tags; 0.0.0-dev when untagged). Override with `make X_VERSION=1.2.3` (the
+# release workflow passes the exact tagged version).
+X_VERSION ?= $(shell bash tools/fork_version.sh dev 2>/dev/null)
+ifneq ($(X_VERSION),)
+CFLAGS += -DPLDMGRX_VERSION=\"$(X_VERSION)\"
+endif
+
+# "Payload Manager X" build: `make ... PLDMGRX=1 [PLDMGRX_PORT=8084|8184]`.
+# Uses the X identity (name "Payload Manager X", app id PLDM00002, /data/pldmgrx,
+# "PLDMGRX_VER:" self signature). Only the HTTP port varies:
+#   PLDMGRX_PORT=8084 -> pldmgrx_8084.elf : drop-in replacement for official
+#   PLDMGRX_PORT=8184 -> pldmgrx_8184.elf : runs alongside the official manager
+PLDMGRX_PORT ?= 8084
+PARAM_X :=
+ifdef PLDMGRX
+CFLAGS += -DPLDMGRX -DMENU_PORT_OVERRIDE=$(PLDMGRX_PORT)
+ELF := pldmgrx_$(PLDMGRX_PORT).elf
+PARAM_X := assets/param_x.json
+endif
+
 all: $(ELF)
+
+# Generate the X app metadata with the chosen port baked into its deeplink.
+assets/param_x.json: assets/param_x.json.in
+	@echo "Generating $@ for port $(PLDMGRX_PORT)..."
+	sed 's/__PORT__/$(PLDMGRX_PORT)/g' $< > $@
 
 # These tests execute the HTTP handler on the host with PS5 services stubbed.
 # See DEVELOPMENT.md for the isolated container option and native build gate.
@@ -80,11 +107,12 @@ frontend-build:
 	@echo "Building frontend..."
 	git submodule update --init --recursive
 	cd frontend && npm install && npm run build
-	@VERSION=$$(grep '#define MENU_VERSION' include/pldmgr.h | awk '{print $$3}' | tr -d '"'); \
+	@XVER="$(X_VERSION)"; [ -n "$$XVER" ] || XVER=$$(bash tools/fork_version.sh dev 2>/dev/null); \
+	UPVER=$$(grep '#define MENU_VERSION' include/pldmgr.h | awk '{print $$3}' | tr -d '"'); \
 	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
 	git diff --quiet || COMMIT="DEV"; \
 	DATE=$$(date -u +"%Y-%m-%d %H:%M:%S UTC"); \
-	TITLE="Payload Manager v$$VERSION by PLK ($$COMMIT, built at $$DATE)"; \
+	TITLE="PS5 Payload Manager X v$$XVER (based on v$$UPVER) by PLK and bsk193 ($$COMMIT, built at $$DATE)"; \
 	echo "Updating title in index.html to: $$TITLE"; \
 	TMP=$$(mktemp "$${TMPDIR:-/tmp}/pldmgr.XXXXXX"); \
 	sed "s|\[\[TITLE_PLACEHOLDER\]\]|$$TITLE|g" frontend/dist/index.html > $$TMP; \
@@ -123,14 +151,14 @@ $(FRONTEND_DIST):
 	@echo "Please run 'make frontend-build' locally on your host machine first."
 	@exit 1
 
-$(ELF): $(ASSET_HEADER) $(MANIFEST_HEADER) $(CA_HEADER) $(FAVICON_SVG_HEADER) $(ICON_PNG_HEADER) $(SRCS)
+$(ELF): $(ASSET_HEADER) $(MANIFEST_HEADER) $(CA_HEADER) $(FAVICON_SVG_HEADER) $(ICON_PNG_HEADER) $(PARAM_X) $(SRCS)
 	@echo "Building $(ELF)..."
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $(ELF) $(SRCS) $(LIBS)
 	@echo "Stripping $(ELF)..."
 	$(STRIP) $(ELF)
 
 clean:
-	rm -f $(ELF) $(ASSET_HEADER) $(MANIFEST_HEADER) $(CA_HEADER) $(FAVICON_SVG_HEADER) $(ICON_PNG_HEADER) src/*.o
+	rm -f $(ELF) $(ASSET_HEADER) $(MANIFEST_HEADER) $(CA_HEADER) $(FAVICON_SVG_HEADER) $(ICON_PNG_HEADER) assets/param_x.json src/*.o
 
 
 

@@ -1,70 +1,103 @@
-name: Release On-Demand
+name: Release (x-v tag)
+
+# Cuts a GitHub Release for the fork. Triggered by pushing an `x-v*` tag whose
+# commit is on `main`. The fork's version comes from the tag (x-v1.2.3 ->
+# 1.2.3); it is independent of upstream's MENU_VERSION.
+#
+#   x-v1.2.3            -> stable release, marked Latest
+#   x-v1.2.3-beta.1     -> pre-release, NOT marked Latest
+#
+# The release ELF is named pldmgrx_v<version>.elf (e.g. pldmgrx_v1.2.3.elf) so
+# downstream autoloaders that grab the latest `pldmgrx_v*.elf` keep working.
 
 on:
+  push:
+    tags:
+      - 'x-v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing x-v tag to (re)release (must point at a commit on main)'
+        required: true
 
 jobs:
-  build-and-release:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
+
+      - name: Resolve tag
+        id: tag
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Parse and validate version
+        id: ver
+        run: |
+          OUT=$(bash tools/fork_version.sh parse "${{ steps.tag.outputs.tag }}")
+          echo "version=$(echo "$OUT" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "kind=$(echo "$OUT" | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+          echo "upstream=$(bash tools/fork_version.sh upstream)" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse tags not on main
+        run: |
+          git fetch origin main
+          SHA=$(git rev-list -n1 "${{ steps.tag.outputs.tag }}")
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::Tag ${{ steps.tag.outputs.tag }} ($SHA) is not an ancestor of origin/main. Releases must come from main."
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_ENV"
+
+      - name: Refuse if the release already exists
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "::error::Release ${{ steps.tag.outputs.tag }} already exists."
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Extract Version
-        id: version
-        run: |
-          VERSION=$(grep '#define MENU_VERSION' include/pldmgr.h | awk '{print $3}' | tr -d '"' | tr -d '\r')
-          if [ -z "$VERSION" ]; then
-            echo "Error: Could not find MENU_VERSION in include/pldmgr.h"
-            exit 1
-          fi
-          echo "Extracted version: $VERSION"
-          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+      - name: Build frontend
+        run: make frontend-build X_VERSION=${{ steps.ver.outputs.version }}
 
-      - name: Check if release exists
+      - name: Build PS5 SDK Docker image
+        run: docker build -t ps5-payload-sdk -f Dockerfile.sdk .
+
+      - name: Build Payload Manager X (port 8084)
+        run: docker run --rm -v "$(pwd)":/src -w /src ps5-payload-sdk make clean all PLDMGRX=1 PLDMGRX_PORT=8084 X_VERSION=${{ steps.ver.outputs.version }}
+
+      - name: Name the release ELF
+        run: mv pldmgrx_8084.elf "pldmgrx_v${{ steps.ver.outputs.version }}.elf"
+
+      - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists. Aborting."
-            exit 1
+          VER="${{ steps.ver.outputs.version }}"
+          UP="${{ steps.ver.outputs.upstream }}"
+          PREV=$(git -c versionsort.suffix=- tag -l 'x-v*' --sort=-v:refname | grep -vx "${{ steps.tag.outputs.tag }}" | head -n1 || true)
+          NOTES="**PS5 Payload Manager X $VER**, based on [itsPLK v$UP](https://github.com/itsPLK/ps5-payload-manager/releases/tag/v$UP)."
+          if [ -n "$PREV" ]; then
+            NOTES="$NOTES"$'\n\n'"Changes: [$PREV...${{ steps.tag.outputs.tag }}](https://github.com/${{ github.repository }}/compare/$PREV...${{ steps.tag.outputs.tag }})"
           fi
-          echo "Release $TAG does not exist. Proceeding."
-
-      - name: Build Payload Manager
-        run: |
-          chmod +x build_release.sh
-          ./build_release.sh
-
-      - name: Create Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
-          # Get the most recent tag before this release to generate the changelog link
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          
-          if [ -n "$PREV_TAG" ]; then
-            NOTES="Full Changelog: https://github.com/${{ github.repository }}/compare/$PREV_TAG...$TAG"
-          else
-            NOTES="First Release."
+          FLAGS="--latest"
+          if [ "${{ steps.ver.outputs.kind }}" = "prerelease" ]; then
+            FLAGS="--prerelease --latest=false"
           fi
-          
-          # Create the release and upload the ELF file
-          gh release create "$TAG" \
-            --title "$TAG" \
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --target "$sha" \
+            --title "PS5 Payload Manager X $VER" \
             --notes "$NOTES" \
-            "pldmgr_v${VERSION}.elf"
+            $FLAGS \
+            "pldmgrx_v${VER}.elf"

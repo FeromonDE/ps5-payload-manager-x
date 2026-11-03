@@ -1,0 +1,11 @@
+{
+    "titleId": "PLDM00002",
+    "applicationCategoryType": 65536,
+    "deeplinkUri": "http://127.0.0.1:__PORT__/",
+    "localizedParameters": {
+        "defaultLanguage": "en-US",
+        "en-US": {
+            "titleName": "Payload Manager X"
+        }
+    }
+}

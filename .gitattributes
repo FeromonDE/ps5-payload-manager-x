@@ -1,0 +1,13 @@
+# Keep scripts, the Makefile, and CI workflows LF-only so they run correctly on
+# the Linux CI runners regardless of the committer's OS (CRLF breaks bash's
+# shebang and make recipes).
+*.sh         text eol=lf
+*.bash       text eol=lf
+Makefile     text eol=lf
+*.mk         text eol=lf
+*.yml        text eol=lf
+*.yaml       text eol=lf
+*.json.in    text eol=lf
+
+# Windows helper stays CRLF.
+*.ps1        text eol=crlf
