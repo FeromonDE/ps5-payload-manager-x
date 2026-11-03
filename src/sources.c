@@ -948,7 +948,8 @@ int sources_repo_install(const char *source_url, const char *id,
         return -1;
     }
     const char *ext = strrchr(entry->filename, '.');
-    if (!ext || (strcasecmp(ext, ".elf") != 0 && strcasecmp(ext, ".bin") != 0)) {
+    if (!ext || (strcasecmp(ext, ".elf") != 0 && strcasecmp(ext, ".bin") != 0 &&
+                 strcasecmp(ext, ".exfat") != 0)) {
         free(entry);
         json_append(&jb, "{\"ok\":false,\"message\":\"Unsupported file extension in repository\"}");
         return -1;
@@ -1007,6 +1008,25 @@ int sources_repo_install(const char *source_url, const char *id,
             json_append(&jb, "{\"ok\":false,\"message\":\"Self-update must be a newer versioned ELF matching the repository\"}"); return -1;
         }
         json_append(&jb, "{\"ok\":true,\"self_update\":true,\"restart_required\":true,\"refreshed\":%s}", refreshed ? "true" : "false");
+        return jb.error ? -1 : 0;
+    }
+
+    /* ".exfat" entries aren't payloads/slots — drop the verified file into
+     * /data/homebrew (flat) and return, bypassing the slot system entirely. */
+    if (payload_mgr_is_homebrew_name(entry->filename)) {
+        char hb_msg[256];
+        int rc = payload_mgr_install_homebrew(entry->filename, part_path, hb_msg, sizeof(hb_msg));
+        char hb_e[6 * 256];
+        json_escape_checked(&jb, hb_msg, hb_e, sizeof(hb_e));
+        free(entry);
+        if (rc != 0) {
+            remove(part_path); /* harmless if already consumed */
+            json_append(&jb, "{\"ok\":false,\"message\":\"%s\"}", hb_e);
+            return -1;
+        }
+        /* On success install_homebrew already consumed part_path (rename/copy). */
+        json_append(&jb, "{\"ok\":true,\"homebrew\":true,\"message\":\"%s\",\"refreshed\":%s}",
+                    hb_e, refreshed ? "true" : "false");
         return jb.error ? -1 : 0;
     }
 

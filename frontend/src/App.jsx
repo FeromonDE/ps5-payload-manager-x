@@ -465,9 +465,9 @@ function App() {
     if (!file) return
 
     const ext = file.name.split('.').pop().toLowerCase()
-    if (ext !== 'elf' && ext !== 'bin') {
+    if (ext !== 'elf' && ext !== 'bin' && ext !== 'exfat') {
       addToast(
-        t("app.toasts.unsupported_file", "Unsupported file type. Only .elf and .bin files are allowed."),
+        t("app.toasts.unsupported_file", "Unsupported file type. Only .elf, .bin and .exfat files are allowed."),
         "error"
       )
       return

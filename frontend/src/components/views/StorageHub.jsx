@@ -539,7 +539,7 @@ const StorageHub = ({
               title={t("storage_hub.upload_btn", "Upload ELF Payload")}
             >
               <Upload className="w-6 h-6" />
-              <input type="file" className="hidden" onChange={onUpload} accept={isIOS ? undefined : ".elf,.bin"} />
+              <input type="file" className="hidden" onChange={onUpload} accept={isIOS ? undefined : ".elf,.bin,.exfat"} />
             </label>
           )}
         </div>

@@ -32,6 +32,51 @@ static int is_supported_extension(const char *path) {
     return (strcasecmp(ext, ".elf") == 0 || strcasecmp(ext, ".bin") == 0);
 }
 
+int payload_mgr_is_homebrew_name(const char *path) {
+    if (!path) return 0;
+    const char *ext = strrchr(path, '.');
+    return ext && strcasecmp(ext, ".exfat") == 0;
+}
+
+/* ".exfat" files are not payloads: install = copy the file into HOMEBREW_DIR
+ * (/data/homebrew), flat, keeping its filename. Shared by the upload and
+ * repository install paths. Returns 0 on success. */
+int payload_mgr_install_homebrew(const char *filename, const char *source_path,
+                                 char *msg_buf, size_t msg_buf_size) {
+    if (!filename || filename[0] == '.' || strstr(filename, "/") || strstr(filename, "..")) {
+        snprintf(msg_buf, msg_buf_size, "Invalid filename");
+        return -1;
+    }
+    if (ensure_dir_recursive(HOMEBREW_DIR) != 0) {
+        snprintf(msg_buf, msg_buf_size, "Failed to create " HOMEBREW_DIR);
+        return -1;
+    }
+    char dest[512];
+    snprintf(dest, sizeof(dest), "%s/%s", HOMEBREW_DIR, filename);
+    remove(dest);
+    if (rename(source_path, dest) != 0) {
+        /* Cross-device (temp on a different fs): byte-copy then drop the source. */
+        FILE *in = fopen(source_path, "rb");
+        if (!in) { snprintf(msg_buf, msg_buf_size, "Cannot read upload"); return -1; }
+        FILE *out = fopen(dest, "wb");
+        if (!out) { fclose(in); snprintf(msg_buf, msg_buf_size, "Cannot write to " HOMEBREW_DIR); return -1; }
+        char buf[65536];
+        size_t n;
+        int ok = 1;
+        while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+            if (fwrite(buf, 1, n, out) != n) { ok = 0; break; }
+        }
+        if (ferror(in)) ok = 0;
+        fclose(in);
+        if (fclose(out) != 0) ok = 0;
+        if (!ok) { remove(dest); snprintf(msg_buf, msg_buf_size, "Copy to " HOMEBREW_DIR " failed"); return -1; }
+        remove(source_path);
+    }
+    pldmgr_log("[PLDMGR] Homebrew install: %s -> %s\n", filename, dest);
+    snprintf(msg_buf, msg_buf_size, "Installed %s to homebrew", filename);
+    return 0;
+}
+
 static int is_allowed_usb_path(const char *path) {
     if (!path || path[0] == '\0') return 0;
     if (strstr(path, "..")) return 0;
@@ -351,6 +396,13 @@ int payload_mgr_import_to_storage_mode(const char *filename, const char *temp_pa
     if (!filename || strstr(filename, "/") || strstr(filename, "..") || is_pldmgr_name(filename)) {
         snprintf(msg_buf, msg_buf_size, "Invalid filename");
         return -1;
+    }
+
+    /* ".exfat" uploads aren't payloads/slots — drop the file into /data/homebrew. */
+    if (payload_mgr_is_homebrew_name(filename)) {
+        int rc = payload_mgr_install_homebrew(filename, temp_path, msg_buf, msg_buf_size);
+        if (rc == 0 && out_slot && out_slot_size > 0) out_slot[0] = '\0';
+        return rc;
     }
 
     char lkey[128];

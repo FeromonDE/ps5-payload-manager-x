@@ -105,7 +105,9 @@ int repository_entry_valid(const RepoPayload *entry) {
         is_pldmgr_name(entry->id) || is_pldmgr_name(entry->name) || is_pldmgr_name(entry->filename) ||
         !repository_checksum_valid(entry->checksum)) return 0;
     const char *ext = strrchr(entry->filename, '.');
-    return ext && (!strcasecmp(ext, ".elf") || !strcasecmp(ext, ".bin"));
+    /* ".exfat" is a homebrew file (copied to /data/homebrew), not a payload, but
+     * it is still a valid, checksummed entry to download. */
+    return ext && (!strcasecmp(ext, ".elf") || !strcasecmp(ext, ".bin") || !strcasecmp(ext, ".exfat"));
 }
 
 /* ── JSON parsing ──────────────────────────────────────────── */

@@ -83,6 +83,9 @@
 #define PLDMGR_CONFIG_PATH PLDMGR_DATA_ROOT "/pldmgr_config.txt"
 #define REPOSITORY_CACHE_PATH PLDMGR_DATA_ROOT "/repository_cache.json"
 #define PAYLOADS_STORAGE_DIR PLDMGR_DATA_ROOT "/payloads"
+/* Homebrew drop target: ".exfat" files are not payloads/slots — installing one
+ * just copies it here (flat). Shared path (NOT data-root-scoped) by design. */
+#define HOMEBREW_DIR "/data/homebrew"
 #define REPOSITORY_SOURCE_URL                                                  \
   "https://bsk193.github.io/ps5-payloads-mirror/payloads_v2.json"
 #define LEGACY_REPOSITORY_SOURCE_URL                                           \
