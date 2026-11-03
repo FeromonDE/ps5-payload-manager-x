@@ -1,4 +1,5 @@
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,8 +45,12 @@ typedef struct { char key[MAX_ENTRY_TEXT + 1]; int delay_ms; } SequenceEntry;
  * selection); `forced_run` means run the resolved sequence now with no countdown.
  * launched_bases dedups across startup + sequence so a payload never double-launches. */
 static const char *sequence_path = AUTOLOAD_CONFIG_PATH;
-static volatile int picker_active = 0;
-static volatile int forced_run = 0;
+/* Atomic: picker_active is read by the HTTP thread (pldmgr_autoload_is_picker,
+ * via /autoload_status) while the worker writes it; forced_run crosses the
+ * run_profile thread and the worker. sequence_path and launched_* are touched
+ * only by the worker thread (run_profile joins it first), so need no atomics. */
+static _Atomic int picker_active = 0;
+static _Atomic int forced_run = 0;
 #define MAX_LAUNCHED 64
 static char launched_bases[MAX_LAUNCHED][128];
 static int launched_count = 0;
