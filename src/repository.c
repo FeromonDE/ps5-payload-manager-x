@@ -21,6 +21,7 @@
 #include "slot.h"
 #include "json_helpers.h"
 #include "pldmgr.h"
+#include "version_x.h"
 #include "assets_cacert_pem.h"
 
 /* ── cURL download helper ──────────────────────────────────── */
@@ -282,7 +283,7 @@ static int self_version_valid(const char *version) {
 }
 
 int repository_self_update_entry_valid(const RepoPayload *entry, const char *source_url) {
-    if (!entry || !is_pldmgr_official_source(source_url) || strcmp(entry->id, "pldmgr") ||
+    if (!entry || !is_pldmgr_official_source(source_url) || strcmp(entry->id, PLDMGR_SELF_ID) ||
         !is_pldmgr_name(entry->filename) || strchr(entry->filename, '/') ||
         strchr(entry->filename, '\\') || strstr(entry->filename, "..") ||
         !self_version_valid(entry->version) || !entry->checksum[0] ||
@@ -299,8 +300,15 @@ int repository_self_update_version_fd(int fd, char *version, size_t size) {
     if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
         (uint64_t)st.st_size > PLDMGR_PAYLOAD_DOWNLOAD_LIMIT ||
         pread(fd, magic, 4, 0) != 4 || memcmp(magic, "\177ELF", 4)) return -1;
-    /* Overlap covers a marker and its complete, bounded version across chunks. */
-    char buffer[8192 + 74];
+    /* Scan for THIS build's own marker: "PLDMGRX_VER:" for the X build (12
+     * chars), "PLDMGR_VER:" for stock (11). An X build therefore only ever
+     * recognises other X ELFs — never a stock pldmgr, whose marker diverges at
+     * the 'X'. Overlap covers a marker + its complete, bounded version across
+     * chunk boundaries. */
+    const char *marker = PLDMGR_SELF_MARKER;
+    size_t mlen = strlen(marker);
+    char buffer[8192 + 80];
+    size_t overlap = mlen + 63;
     size_t carry = 0;
     off_t offset = 0;
     while (offset < st.st_size) {
@@ -308,17 +316,17 @@ int repository_self_update_version_fd(int fd, char *version, size_t size) {
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) return -1;
         size_t used = carry + (size_t)n;
-        for (size_t i = 0; i + 11 < used; i++) {
-            if (memcmp(buffer + i, "PLDMGR_VER:", 11)) continue;
-            const char *v = buffer + i + 11;
-            size_t available = used - i - 11;
+        for (size_t i = 0; i + mlen < used; i++) {
+            if (memcmp(buffer + i, marker, mlen)) continue;
+            const char *v = buffer + i + mlen;
+            size_t available = used - i - mlen;
             const char *end = memchr(v, 0, available < 64 ? available : 64);
             if (!end || (size_t)(end - v) >= size || *v < '0' || *v > '9' || !self_version_valid(v)) continue;
             strcpy(version, v);
             return 0;
         }
         offset += n;
-        carry = used < 74 ? used : 74;
+        carry = used < overlap ? used : overlap;
         memmove(buffer, buffer + used - carry, carry);
     }
     return -1;
@@ -327,12 +335,19 @@ int repository_self_update_version_fd(int fd, char *version, size_t size) {
 static int check_self_update(char *out_path, size_t size, char *version, size_t version_size) {
     if (!out_path || !size || !version || version_size < 64) return 0;
     out_path[0] = 0;
-    snprintf(version, version_size, "%s", MENU_VERSION);
+    /* Baseline is OUR running version (fork semver for the X build), so a
+     * candidate must beat the fork version — never upstream's MENU_VERSION. */
+    snprintf(version, version_size, "%s", PLDMGR_RUNNING_VERSION);
     DIR *root = opendir(PAYLOADS_STORAGE_DIR);
     if (!root) return 0;
     struct dirent *dir;
     while ((dir = readdir(root))) {
+#ifdef PLDMGRX
+        /* Only our own folders, so we never inspect a stock pldmgr install. */
+        if (strcasecmp(dir->d_name, "pldmgrx") && strcasecmp(dir->d_name, "payload-manager-x")) continue;
+#else
         if (strcasecmp(dir->d_name, "pldmgr") && strcasecmp(dir->d_name, "payload-manager")) continue;
+#endif
         char folder[768];
         snprintf(folder, sizeof(folder), "%s/%s", PAYLOADS_STORAGE_DIR, dir->d_name);
         DIR *d = opendir(folder);
@@ -370,7 +385,7 @@ int repository_install_self_update(const RepoPayload *entry, const char *source_
     char version[64], hash[65];
     int invalid = repository_self_update_version_fd(fd, version, sizeof(version)) ||
         slot_version_compare(version, entry->version) ||
-        slot_version_compare(version, MENU_VERSION) <= 0 ||
+        slot_version_compare(version, PLDMGR_RUNNING_VERSION) <= 0 ||
         compute_sha256_file(part_path, hash) || strcasecmp(hash, entry->checksum) || fsync(fd);
     close(fd);
     if (invalid) return -1;

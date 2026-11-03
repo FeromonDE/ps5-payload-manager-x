@@ -25,6 +25,7 @@
    * SIGKILL each other. */
   #define PLDMGR_SELF_MARKER "PLDMGRX_VER:"
   #define PLDMGR_PROC_NAME   "pldmgrx.elf"
+  #define PLDMGR_SELF_ID     "pldmgrx"
 #else
   #define MENU_PORT        8084
   #define PLDMGR_DATA_ROOT "/data/pldmgr"
@@ -32,6 +33,7 @@
   #define PLDMGR_APP_NAME  "Payload Manager"
   #define PLDMGR_SELF_MARKER "PLDMGR_VER:"
   #define PLDMGR_PROC_NAME   "pldmgr.elf"
+  #define PLDMGR_SELF_ID     "pldmgr"
 #endif
 
 /* Network Settings */
