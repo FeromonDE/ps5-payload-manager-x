@@ -58,6 +58,39 @@ export const isSystemPayload = (filename) => {
   );
 };
 
+/* Fork: base identity of a payload (strip path, extension, version/platform
+ * suffix) so autoload profiles dedup different versions of the same payload. */
+export const payloadBaseName = (filename) => {
+  if (!filename) return '';
+  let clean = filename.split('/').pop();
+  const dot = clean.lastIndexOf('.');
+  if (dot > 0) clean = clean.slice(0, dot);
+  let idx = clean.indexOf('_v');
+  if (idx < 0) idx = clean.indexOf('-v');
+  if (idx >= 0) {
+    clean = clean.slice(0, idx);
+  } else {
+    const m = clean.match(/[_-]\d/);
+    if (m) clean = clean.slice(0, m.index);
+  }
+  clean = clean.replace(/[_-]ps[45].*$/i, '');
+  return clean.toLowerCase();
+};
+export const parseFw = (s) => {
+  if (!s) return null;
+  const n = parseFloat(String(s).replace(/[^0-9.]/g, ''));
+  return isNaN(n) ? null : n;
+};
+/* Fork: firmware compatibility. Empty consoleFw => always compatible. */
+export const fwCompatible = (minFw, maxFw, consoleFw) => {
+  const c = parseFw(consoleFw);
+  if (c === null) return true;
+  const mn = parseFw(minFw), mx = parseFw(maxFw);
+  if (mn !== null && c < mn) return false;
+  if (mx !== null && c > mx) return false;
+  return true;
+};
+
 export const formatVersionTag = (version, maxLen = 8) => {
   if (!version || typeof version !== 'string') return '';
   const trimmed = version.trim();

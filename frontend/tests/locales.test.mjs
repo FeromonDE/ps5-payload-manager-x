@@ -57,7 +57,9 @@ test('source consumers have English entries, including dynamically selected cate
 test('Dutch has reviewed translations with explicit legitimate English-identical terms', () => {
   const legitimate = new Set(['app.nav.dashboard', 'app.nav.auto_mobile', 'app.dashboard.title_2',
     'storage_hub.update_badge', 'payload_detail.readme_title', 'category.Loaders',
-    'storage_hub.payload_count_one', 'storage_hub.payload_count_other']);
+    'storage_hub.payload_count_one', 'storage_hub.payload_count_other',
+    // Fork: loanwords identical in Dutch ("payloads", "Autoload").
+    'profiles.item_count', 'profiles.title_1']);
   for (const [key, value] of Object.entries(resources['nl-NL'].translation)) {
     if (value === english[key]) assert.ok(legitimate.has(key), `Dutch untranslated: ${key}`);
   }
