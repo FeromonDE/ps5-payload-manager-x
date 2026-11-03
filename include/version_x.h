@@ -16,7 +16,11 @@
  * "based on v<PLDMGRX_UPSTREAM_VERSION>" alongside.
  */
 
-#include "pldmgr.h" /* for MENU_VERSION (upstream's, never edited by the fork) */
+/* Requires pldmgr.h (for MENU_VERSION) to be included FIRST by the using file.
+ * We deliberately do NOT include pldmgr.h here: pldmgr.h defines a static
+ * SCAN_DIRS[] array in-header, and pulling it in via two include paths (e.g. the
+ * host-test harness's -I ordering) would redefine that array. Every includer
+ * (main.c, repository.c, http_server.c, …) already includes pldmgr.h above. */
 
 #ifndef PLDMGRX_VERSION
 #define PLDMGRX_VERSION "0.0.0-dev"
