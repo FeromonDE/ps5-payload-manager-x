@@ -254,5 +254,7 @@
   "payload_detail.loading_release": "Veröffentlichungsdetails werden geladen...",
   "payload_detail.no_release_notes": "Keine Versionshinweise für diese Version verfügbar.",
   "settings.autoload_return_title": "Rückkehr nach Autoload",
-  "settings.autoload_return_desc": "3 Sekunden nach dem erfolgreichen Laden aller Payloads automatisch zum Dashboard zurückkehren."
+  "settings.autoload_return_desc": "3 Sekunden nach dem erfolgreichen Laden aller Payloads automatisch zum Dashboard zurückkehren.",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

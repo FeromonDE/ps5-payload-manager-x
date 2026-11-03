@@ -252,5 +252,7 @@
   "payload_detail.loading_release": "リリース詳細を読み込み中...",
   "payload_detail.no_release_notes": "このバージョンのリリースノートはありません。",
   "settings.autoload_return_title": "自動読み込み後に戻る",
-  "settings.autoload_return_desc": "すべてのペイロードの読み込みに成功したら、3秒後にダッシュボードに自動的に戻ります。"
+  "settings.autoload_return_desc": "すべてのペイロードの読み込みに成功したら、3秒後にダッシュボードに自動的に戻ります。",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

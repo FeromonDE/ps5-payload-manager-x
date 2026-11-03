@@ -256,5 +256,7 @@
   "payload_detail.loading_release": "Carregando detalhes da versão...",
   "payload_detail.no_release_notes": "Nenhuma nota de lançamento disponível para esta versão.",
   "settings.autoload_return_title": "Retornar após carregamento automático",
-  "settings.autoload_return_desc": "Retornar automaticamente ao painel 3 segundos após todos os payloads serem carregados com sucesso."
+  "settings.autoload_return_desc": "Retornar automaticamente ao painel 3 segundos após todos os payloads serem carregados com sucesso.",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

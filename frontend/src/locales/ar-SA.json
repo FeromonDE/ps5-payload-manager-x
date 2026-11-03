@@ -262,5 +262,7 @@
   "payload_detail.loading_release": "جارٍ تحميل تفاصيل الإصدار...",
   "payload_detail.no_release_notes": "لا توجد ملاحظات إصدار متاحة لهذا الإصدار.",
   "settings.autoload_return_title": "العودة بعد التحميل التلقائي",
-  "settings.autoload_return_desc": "العودة تلقائيًا إلى لوحة التحكم بعد 3 ثوانٍ من تحميل جميع الحمولات بنجاح."
+  "settings.autoload_return_desc": "العودة تلقائيًا إلى لوحة التحكم بعد 3 ثوانٍ من تحميل جميع الحمولات بنجاح.",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

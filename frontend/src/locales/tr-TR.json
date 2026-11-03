@@ -254,5 +254,7 @@
   "payload_detail.loading_release": "Sürüm ayrıntıları yükleniyor...",
   "payload_detail.no_release_notes": "Bu sürüm için sürüm notu bulunmuyor.",
   "settings.autoload_return_title": "Otomatik Yükleme Sonrası Dönüş",
-  "settings.autoload_return_desc": "Tüm payloadlar başarıyla yüklendikten 3 saniye sonra otomatik olarak panele dön."
+  "settings.autoload_return_desc": "Tüm payloadlar başarıyla yüklendikten 3 saniye sonra otomatik olarak panele dön.",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

@@ -252,5 +252,7 @@
   "payload_detail.loading_release": "正在加载发布详情...",
   "payload_detail.no_release_notes": "此版本没有可用的发布说明。",
   "settings.autoload_return_title": "自动加载后返回",
-  "settings.autoload_return_desc": "所有载荷成功加载后，等待 3 秒自动返回主页。"
+  "settings.autoload_return_desc": "所有载荷成功加载后，等待 3 秒自动返回主页。",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

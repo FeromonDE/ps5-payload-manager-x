@@ -55,6 +55,8 @@
   "payload_detail.install": "Install",
   "payload_detail.installing": "Installing...",
   "payload_detail.reinstall": "Reinstall",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental",
   "payload_detail.whats_new": "What's New",
   "payload_detail.readme_title": "README",
   "payload_detail.view_on_github": "View on GitHub",

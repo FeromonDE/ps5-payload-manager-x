@@ -141,7 +141,7 @@ test('pldmgr payloads are correctly filtered from repository payload lists', () 
 
 test('repository visibility admits only the official self-update and retains system payload guards', async () => {
   const { isRepositoryPayloadVisible, OFFICIAL_REPOSITORY_URL } = await import('../src/utils/payloadStatus.js');
-  const payload = { id: 'pldmgr', name: 'pldmgr', filename: 'pldmgr_v0.6.0.elf' };
+  const payload = { id: 'pldmgrx', name: 'pldmgrx', filename: 'pldmgrx_v0.6.0.elf' };
   assert.equal(isRepositoryPayloadVisible(payload, OFFICIAL_REPOSITORY_URL), true);
   for (const url of ['https://custom.invalid', `${OFFICIAL_REPOSITORY_URL}?custom=1`, `${OFFICIAL_REPOSITORY_URL}.evil`]) {
     assert.equal(isRepositoryPayloadVisible(payload, url), false);

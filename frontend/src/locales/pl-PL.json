@@ -258,5 +258,7 @@
   "payload_detail.loading_release": "Wczytywanie szczegółów wydania...",
   "payload_detail.no_release_notes": "Brak informacji o zmianach dla tej wersji.",
   "settings.autoload_return_title": "Powrót po autoloadzie",
-  "settings.autoload_return_desc": "Automatycznie wróć do pulpitu 3 sekundy po pomyślnym załadowaniu wszystkich payloadów."
+  "settings.autoload_return_desc": "Automatycznie wróć do pulpitu 3 sekundy po pomyślnym załadowaniu wszystkich payloadów.",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

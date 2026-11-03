@@ -1,8 +1,8 @@
 import { compareVersions, slug } from './versions.js';
 import { isSystemPayload } from './helpers.js';
 
-export const OFFICIAL_REPOSITORY_URL = 'https://itsplk.github.io/ps5-payloads-mirror/payloads_v2.json';
-export const LEGACY_OFFICIAL_REPOSITORY_URL = 'https://itsplk.github.io/ps5-payloads-mirror/payloads.json';
+export const OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/console-homebrew-hub/payloads_v2.json';
+export const LEGACY_OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/console-homebrew-hub/payloads.json';
 
 export function isOfficialRepoUrl(url) {
   const norm = normalizeUrl(url);
@@ -17,7 +17,9 @@ export function isOfficialSource(sourceName, sourceUrl) {
 }
 
 export function isOfficialSelfUpdate(payload, srcUrl) {
-  return (payload?.id || slug(payload?.name || payload?.filename)) === 'pldmgr' &&
+  // Fork: our manager's slot id is "pldmgrx" (stock uses "pldmgr"). This is the
+  // frontend counterpart of PLDMGR_SELF_ID — keeps self-update detection aligned.
+  return (payload?.id || slug(payload?.name || payload?.filename)) === 'pldmgrx' &&
     isOfficialRepoUrl(srcUrl);
 }
 
@@ -103,8 +105,11 @@ export function resolveSourceDisplayName(slot, sources = []) {
     }
   }
 
-  // 3. Known official repo URL fallback
+  // 3. Known official repo URL fallback (our mirror via isOfficialRepoUrl, plus
+  //    upstream's legacy mirror hosts for back-compat)
   if (
+    isOfficialRepoUrl(slot.source_url || slot.source_name) ||
+    normSlotUrl.includes('console-homebrew-hub') ||
     normSlotUrl.includes('ps5-payloads-mirror') ||
     normSlotUrl.includes('ps5-payloads.pages.dev')
   ) {

@@ -252,5 +252,7 @@
   "payload_detail.loading_release": "กำลังโหลดรายละเอียดรุ่น...",
   "payload_detail.no_release_notes": "ไม่มีบันทึกประจำรุ่นสำหรับเวอร์ชันนี้",
   "settings.autoload_return_title": "กลับหลังโหลดอัตโนมัติ",
-  "settings.autoload_return_desc": "กลับไปยังแดชบอร์ดโดยอัตโนมัติ 3 วินาทีหลังจากโหลดเพย์โหลดทั้งหมดสำเร็จ"
+  "settings.autoload_return_desc": "กลับไปยังแดชบอร์ดโดยอัตโนมัติ 3 วินาทีหลังจากโหลดเพย์โหลดทั้งหมดสำเร็จ",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

@@ -254,5 +254,7 @@
   "payload_detail.loading_release": "Releasedetails laden...",
   "payload_detail.no_release_notes": "Geen releaseopmerkingen beschikbaar voor deze versie.",
   "settings.autoload_return_title": "Terugkeren na autoload",
-  "settings.autoload_return_desc": "Keer automatisch terug naar het dashboard 3 seconden nadat alle payloads met succes zijn geladen."
+  "settings.autoload_return_desc": "Keer automatisch terug naar het dashboard 3 seconden nadat alle payloads met succes zijn geladen.",
+  "payload_detail.choose_version": "Kies versie",
+  "payload_detail.experimental": "experimenteel"
 }

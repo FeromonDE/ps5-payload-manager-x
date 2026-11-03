@@ -258,5 +258,7 @@
   "payload_detail.loading_release": "Загрузка сведений о выпуске...",
   "payload_detail.no_release_notes": "Примечания к этой версии недоступны.",
   "settings.autoload_return_title": "Возврат после автозагрузки",
-  "settings.autoload_return_desc": "Автоматически возвращаться на главную через 3 секунды после успешной загрузки всех пейлоадов."
+  "settings.autoload_return_desc": "Автоматически возвращаться на главную через 3 секунды после успешной загрузки всех пейлоадов.",
+  "payload_detail.choose_version": "Choose version",
+  "payload_detail.experimental": "experimental"
 }

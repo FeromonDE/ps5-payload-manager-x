@@ -4,13 +4,56 @@ import { useTranslation } from 'react-i18next'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn, isPS5, isIOS } from '../../utils/helpers'
 import { getPayloadStatus, resolveSourceDisplayName, isRepositoryPayloadVisible } from '../../utils/payloadStatus'
-import { slug } from '../../utils/versions'
+import { slug, compareVersions } from '../../utils/versions'
 import { formatSyncTime } from '../../utils/syncTime'
 import PayloadName from '../ui/PayloadName'
 import Modal from '../ui/Modal'
 import { useRepository } from '../../contexts/RepositoryContext'
 import PayloadCard from '../ui/PayloadCard'
 import PayloadDetailPanel from '../ui/PayloadDetailPanel'
+
+/* A catalog entry is "experimental" when the mirror tags its channel as anything
+ * other than stable. Used only to pick a card's default (newest stable) version. */
+const isExperimentalEntry = (p) => {
+  const ch = p && p.channel ? String(p.channel).toLowerCase() : ''
+  return Boolean(ch) && ch !== 'stable'
+}
+
+/* Collapse catalog entries that are the SAME payload (same slot `id`) into one
+ * card carrying every version in `.versions`. Genuinely different payloads keep
+ * distinct ids (e.g. "KStuff Lite" vs "KStuff Lite Drakmor") and stay separate.
+ * The representative shown on the card is the installed version if any, else the
+ * newest stable, else the newest; aggregate install/update reflect the group. */
+const groupByVersion = (list) => {
+  const byId = new Map()
+  for (const p of list) {
+    const key = p.id || slug(p.name || p.filename || '')
+    const arr = byId.get(key)
+    if (arr) arr.push(p)
+    else byId.set(key, [p])
+  }
+  const out = []
+  for (const group of byId.values()) {
+    if (group.length === 1) {
+      out.push(group[0])
+      continue
+    }
+    const sorted = [...group].sort((a, b) =>
+      compareVersions(b.version, a.version, b.last_update, a.last_update)
+    )
+    const rep =
+      sorted.find((v) => v.isInstalled) ||
+      sorted.find((v) => !isExperimentalEntry(v)) ||
+      sorted[0]
+    out.push({
+      ...rep,
+      versions: sorted,
+      isInstalled: sorted.some((v) => v.isInstalled),
+      isUpdate: sorted.some((v) => v.isUpdate),
+    })
+  }
+  return out
+}
 
 const StorageHub = ({
   items = [],
@@ -534,6 +577,10 @@ const StorageHub = ({
                     (p.description && p.description.toLowerCase().includes(q))
                 )
               }
+
+              // Collapse multiple versions of the same payload (same slot id) into
+              // a single card; the detail panel exposes the version dropdown.
+              availablePayloads = groupByVersion(availablePayloads)
 
               // Auto-expand if there's only 1 source, otherwise respect state or active search
               const isExpanded =

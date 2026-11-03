@@ -94,9 +94,26 @@ const PayloadDetailPanel = ({
   const linkModalUrl = propExternalLinkUrl !== undefined ? propExternalLinkUrl : localLinkUrl;
   const setLinkModalUrl = propSetExternalLinkUrl || setLocalLinkUrl;
 
-  const repoUrl = getRepoUrl(payload);
-  const installedSlot = statusInfo?.installedSlot?.slot;
-  const canRemove = Boolean(isInstalled && installedSlot && onDelete);
+  /* Version picker: the payload may carry sibling versions (same slot id). The
+   * header shows a dropdown and the SELECTED version drives the version pill,
+   * status badges, install target and removal. Single-version payloads behave
+   * exactly as before (versions == [payload]). */
+  const versions = Array.isArray(payload.versions) && payload.versions.length
+    ? payload.versions
+    : [payload];
+  const versionKey = (v) => (v && (v.filename || v.version || v.id)) || '';
+  // Defaults to the representative (payload). No reset-effect needed: the panel
+  // is keyed on the payload identity by its parent, so selecting a different
+  // card remounts it and re-runs this initializer.
+  const [activeKey, setActiveKey] = useState(() => versionKey(payload));
+  const active = versions.find((v) => versionKey(v) === activeKey) || payload;
+  const activeStatus = active.statusInfo || statusInfo;
+  const activeInstalled = active.isInstalled !== undefined ? active.isInstalled : isInstalled;
+  const activeUpdate = active.isUpdate !== undefined ? active.isUpdate : isUpdate;
+
+  const repoUrl = getRepoUrl(active);
+  const installedSlot = activeStatus?.installedSlot?.slot;
+  const canRemove = Boolean(activeInstalled && installedSlot && onDelete);
 
   const handleMarkdownClick = (e) => {
     const link = e.target.closest('a');
@@ -191,18 +208,39 @@ const PayloadDetailPanel = ({
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white tracking-tight break-words">
               {payload.name || payload.filename}
             </h1>
-            {payload.version && (
+            {active.version && (
               <span className="px-2.5 py-1 rounded-lg bg-ps-blue/15 text-ps-blue border border-ps-blue/30 font-extrabold text-xs sm:text-sm tracking-wider uppercase shrink-0">
-                {String(payload.version).startsWith('v') ? payload.version : `v${payload.version}`}
+                {String(active.version).startsWith('v') ? active.version : `v${active.version}`}
               </span>
             )}
-            {isInstalled && (
+            {versions.length > 1 && (
+              <select
+                value={activeKey}
+                onChange={(e) => setActiveKey(e.target.value)}
+                aria-label={t("payload_detail.choose_version", "Choose version")}
+                className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/15 text-white font-semibold text-xs sm:text-sm shrink-0 focus:outline-none focus:border-ps-blue cursor-pointer"
+              >
+                {versions.map((v) => {
+                  const ch = v.channel ? String(v.channel).toLowerCase() : '';
+                  const label =
+                    (String(v.version || '').startsWith('v') ? v.version : `v${v.version || '?'}`) +
+                    (ch && ch !== 'stable' ? ` · ${t("payload_detail.experimental", "experimental")}` : '') +
+                    (v.isInstalled ? ` · ${t("payload_detail.installed", "installed")}` : '');
+                  return (
+                    <option key={versionKey(v)} value={versionKey(v)} className="bg-ps-card text-white">
+                      {label}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+            {activeInstalled && (
               <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-extrabold text-xs sm:text-sm tracking-wider uppercase inline-flex items-center gap-1.5 shrink-0">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>{t("payload_detail.installed", "Installed")}</span>
               </span>
             )}
-            {isUpdate && !isInstalled && (
+            {activeUpdate && !activeInstalled && (
               <span className="px-2.5 py-1 rounded-lg bg-ps-blue/20 text-ps-blue border border-ps-blue/40 font-extrabold text-xs sm:text-sm tracking-wider uppercase inline-flex items-center gap-1.5 shrink-0">
                 <ArrowUpCircle className="w-3.5 h-3.5" />
                 <span>{t("storage_hub.update_badge", "Update")}</span>
@@ -283,10 +321,10 @@ const PayloadDetailPanel = ({
         {/* Action Button: Compact, nicely proportioned */}
         <div className="shrink-0 w-full sm:w-auto md:self-start pt-1 flex flex-col gap-2">
           {(() => {
-            const buttonAction = statusInfo ? statusInfo.buttonAction : (isUpdate ? 'update' : (isInstalled ? 'reinstall' : 'install'));
+            const buttonAction = activeStatus ? activeStatus.buttonAction : (activeUpdate ? 'update' : (activeInstalled ? 'reinstall' : 'install'));
 
             if (isInstalling) {
-              const label = (buttonAction === 'update' || isUpdate)
+              const label = (buttonAction === 'update' || activeUpdate)
                 ? t("payload_detail.updating", "Updating...")
                 : t("payload_detail.installing", "Installing...");
               return (
@@ -305,7 +343,7 @@ const PayloadDetailPanel = ({
               return (
                 <button
                   type="button"
-                  onClick={() => onInstall(payload, srcId, srcUrl, statusInfo)}
+                  onClick={() => onInstall(active, srcId, srcUrl, activeStatus)}
                   className="w-full sm:w-auto inline-flex items-center justify-center space-x-2.5 px-7 py-3.5 rounded-2xl font-extrabold text-base transition-all active:scale-95 shadow-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-950/40"
                 >
                   <ArrowUpCircle className="w-5 h-5 shrink-0" />
@@ -322,7 +360,7 @@ const PayloadDetailPanel = ({
               return (
                 <button
                   type="button"
-                  onClick={() => onInstall(payload, srcId, srcUrl, statusInfo)}
+                  onClick={() => onInstall(active, srcId, srcUrl, activeStatus)}
                   className="w-full sm:w-auto inline-flex items-center justify-center space-x-2.5 px-7 py-3.5 rounded-2xl font-extrabold text-base transition-all active:scale-95 shadow-lg bg-ps-blue hover:bg-ps-blue/80 text-white shadow-ps-blue/20"
                 >
                   <CloudDownload className="w-5 h-5 shrink-0" />
@@ -343,7 +381,7 @@ const PayloadDetailPanel = ({
           })()}
           {canRemove && (
             <button type="button" disabled={isInstalling}
-              onClick={() => onDelete(installedSlot, payload.name || payload.filename)}
+              onClick={() => onDelete(installedSlot, active.name || active.filename)}
               className="w-full sm:w-auto inline-flex items-center justify-center space-x-2.5 px-7 py-3.5 rounded-2xl font-extrabold text-base transition-colors bg-red-600/10 hover:bg-red-600 text-red-400 hover:text-white border border-red-500/30 disabled:opacity-50 disabled:pointer-events-none">
               <Trash2 className="w-5 h-5 shrink-0" />
               <span>{t("app.dashboard.removePayload", "Remove Payload")}</span>
