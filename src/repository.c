@@ -47,10 +47,20 @@ int download_to_file_limited(const char *url, const char *out_path, size_t limit
     DownloadOutput output = { fp, 0, limit };
     if (curl) {
 #define SET_OPTION(option, value) do { res = curl_easy_setopt(curl, option, value); if (res != CURLE_OK) goto finished; } while (0)
+        int is_catalog = (strcmp(url, REPOSITORY_SOURCE_URL) == 0);
         SET_OPTION(CURLOPT_URL, url);
         SET_OPTION(CURLOPT_NOSIGNAL, 1L);
-        SET_OPTION(CURLOPT_CONNECTTIMEOUT, strcmp(url, REPOSITORY_SOURCE_URL) ? 10L : 3L);
-        SET_OPTION(CURLOPT_TIMEOUT, strcmp(url, REPOSITORY_SOURCE_URL) ? 60L : 5L);
+        SET_OPTION(CURLOPT_CONNECTTIMEOUT, is_catalog ? 3L : 10L);
+        if (is_catalog) {
+            /* Catalog JSON is small and must stay responsive. */
+            SET_OPTION(CURLOPT_TIMEOUT, 5L);
+        } else {
+            /* Payloads can be large (e.g. a ~470 MiB .exfat homebrew image). A
+             * fixed total timeout would kill a slow-but-progressing download, so
+             * abort only when the transfer stalls below 2 KB/s for 30s. */
+            SET_OPTION(CURLOPT_LOW_SPEED_LIMIT, 2048L);
+            SET_OPTION(CURLOPT_LOW_SPEED_TIME, 30L);
+        }
         SET_OPTION(CURLOPT_WRITEFUNCTION, write_data);
         SET_OPTION(CURLOPT_WRITEDATA, &output);
         SET_OPTION(CURLOPT_USERAGENT, "pldmgr/1.0");

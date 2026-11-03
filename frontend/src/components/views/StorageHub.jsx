@@ -58,6 +58,7 @@ const groupByVersion = (list) => {
 const StorageHub = ({
   items = [],
   self = null,
+  homebrewFiles = [],
   payloads = [],
   onInstall,
   onDelete,
@@ -145,6 +146,7 @@ const StorageHub = ({
           self,
           sources,
           multiSources,
+          homebrewFiles,
         })
         return {
           ...p,
@@ -159,7 +161,7 @@ const StorageHub = ({
         payloads: enrichedPayloads,
       }
     })
-  }, [sources, items, multiSources, self])
+  }, [sources, items, multiSources, self, homebrewFiles])
 
   // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const resolvedPayloadData = useMemo(() => {
@@ -226,6 +228,7 @@ const StorageHub = ({
         self,
         sources,
         multiSources,
+        homebrewFiles,
       })
       return {
         ...selectedPayload,
@@ -239,7 +242,7 @@ const StorageHub = ({
     }
 
     return null
-  }, [selectedPayload, enrichedSources, items, sources, multiSources, self])
+  }, [selectedPayload, enrichedSources, items, sources, multiSources, self, homebrewFiles])
 
   const currentDetailId =
     resolvedPayloadData?.payload?.id ||

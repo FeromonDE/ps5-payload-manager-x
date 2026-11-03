@@ -57,6 +57,8 @@ function App() {
   const { t } = useTranslation();
   const { getRepoEntry, findRepoEntryById, fetchRemote, clearCache, sources } = useRepository()
   const [items, setItems] = useState([])
+  // Fork: filenames in /data/homebrew, so ".exfat" catalog entries show installed.
+  const [homebrewFiles, setHomebrewFiles] = useState([])
   const [selfUpdate, setSelfUpdate] = useState(null)
   const [usbPayloads, setUsbPayloads] = useState([])
   const [uploadConflictModal, setUploadConflictModal] = useState({ show: false, file: null, folderName: '' })
@@ -377,6 +379,9 @@ function App() {
       const rawItems = data.items || []
       setItems(rawItems)
       setSelfUpdate(data.self || null)
+      // Fork: ".exfat" homebrew lives in /data/homebrew (no slot) — fetch the list
+      // so those catalog entries can show an installed state.
+      api('/homebrew_list').then(hb => { if (appAliveRef.current && Array.isArray(hb?.homebrew)) setHomebrewFiles(hb.homebrew) })
 
       const rawUsb = data.usb || (data.payloads ? data.payloads.filter(p => p.startsWith('/mnt/usb')) : [])
       setUsbPayloads(rawUsb)
@@ -1110,6 +1115,7 @@ function App() {
             <StorageHub
               items={items}
               self={selfUpdate}
+              homebrewFiles={homebrewFiles}
               payloads={payloads}
               payloadMeta={payloadMeta}
               onInstall={handleInstall}

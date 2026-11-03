@@ -138,7 +138,7 @@ export function resolveSourceDisplayName(slot, sources = []) {
  *
  * Local slots never show up on repo cards.
  */
-export function getPayloadStatus({ payload, srcUrl, items = [], sources = [], multiSources = false, self = null }) {
+export function getPayloadStatus({ payload, srcUrl, items = [], sources = [], multiSources = false, self = null, homebrewFiles = [] }) {
   void multiSources;
   if (!payload) {
     return {
@@ -177,6 +177,26 @@ export function getPayloadStatus({ payload, srcUrl, items = [], sources = [], mu
   }
 
   const targetId = payload.id || slug(payload.name || payload.filename);
+
+  // Fork: ".exfat" homebrew installs to /data/homebrew (no slot). Installed state
+  // is simply whether that file is present; it carries no version/update tracking.
+  const hbName = payload.filename || '';
+  if (/\.exfat$/i.test(hbName)) {
+    const installed = Array.isArray(homebrewFiles) && homebrewFiles.includes(hbName);
+    return {
+      status: installed ? 'installed' : 'not_installed',
+      isInstalled: installed,
+      isUpdate: false,
+      installedSlot: installed ? { id: targetId, version: payload.version } : null,
+      otherSlots: [],
+      hasConflict: false,
+      conflictSlot: null,
+      alsoInstalledFrom: null,
+      badge: installed ? 'installed' : null,
+      buttonAction: null,
+    };
+  }
+
   const normSrcUrl = normalizeUrl(srcUrl);
 
   const repoItems = Array.isArray(items)

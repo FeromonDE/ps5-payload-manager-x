@@ -1037,6 +1037,12 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
         pldmgr_startup_list_json(resp_buf, SMALL_RESPONSE_BUFFER_SIZE);
         resp = create_buffer_response(strlen(resp_buf), (void *)resp_buf, MHD_RESPMEM_MUST_FREE);
         add_response_header(resp, "Content-Type", "application/json");
+    } else if (strcmp(url, ROUTE_HOMEBREW_LIST) == 0) {
+        char *resp_buf;
+        if (!alloc_response_buffer_small(&resp_buf)) return send_out_of_memory(conn);
+        slot_homebrew_list_json(resp_buf, SMALL_RESPONSE_BUFFER_SIZE);
+        resp = create_buffer_response(strlen(resp_buf), (void *)resp_buf, MHD_RESPMEM_MUST_FREE);
+        add_response_header(resp, "Content-Type", "application/json");
     } else if (strcmp(url, ROUTE_PROFILE_RUN) == 0) {
         const char *id = MHD_lookup_connection_value(conn, MHD_GET_ARGUMENT_KIND, "id");
         int rc = pldmgr_autoload_run_profile(id);

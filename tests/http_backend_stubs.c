@@ -73,6 +73,9 @@ int slot_resolve(const char *key, char *out, size_t size) {
 int slot_local_key(const char *name, char *out, size_t size) {
     snprintf(out, size, "%s", name); return 0;
 }
+int slot_homebrew_list_json(char *buf, size_t size) {
+    if (buf && size) snprintf(buf, size, "{\"homebrew\":[]}"); return 0;
+}
 int ps5_launch_elf(const char *path) { (void)path; abort(); }
 int ps5_launch_elf_cancellable(const char *path, PayloadLaunchCancelled cancelled, void *context) { (void)path; (void)cancelled; (void)context; abort(); }
 int payload_mgr_delete_payload(const char *key) { (void)key; test_mutation_calls++; return 0; }

@@ -62,6 +62,8 @@
 #define ROUTE_PROFILE_RUN  "/profile_run"
 #define ROUTE_STARTUP_GET  "/startup_get"
 #define ROUTE_STARTUP_SET  "/startup_set"
+/* Fork: files installed to /data/homebrew (".exfat" homebrew), for UI state. */
+#define ROUTE_HOMEBREW_LIST "/homebrew_list"
 #define ROUTE_REPO_ICONS "/repository_icons"
 #define ROUTE_REPO_CACHE_CLEAR "/repository_cache_clear"
 #define ROUTE_REPO_LIST "/repository_payloads"

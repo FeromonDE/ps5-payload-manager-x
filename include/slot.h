@@ -96,6 +96,8 @@ int slot_migrate_legacy(void);
 int slot_is_homebrew_name(const char *path);
 int slot_install_homebrew(const char *filename, const char *source,
                           char *msg_buf, size_t msg_buf_size);
+/* {"homebrew":[...]} list of files in /data/homebrew (for UI installed-state). */
+int slot_homebrew_list_json(char *buf, size_t size);
 
 /* Retrieve a complete valid legacy paths map and clear its file on success.
  * Returns -1 if unavailable, -2 if invalid/too large (file retained). */

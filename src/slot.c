@@ -182,6 +182,33 @@ int slot_install_homebrew(const char *filename, const char *source,
     return 0;
 }
 
+/* List the regular files currently in HOMEBREW_DIR as {"homebrew":["name",...]}
+ * so the UI can show ".exfat" catalog entries as installed (they have no slot). */
+int slot_homebrew_list_json(char *buf, size_t size) {
+    JsonListBuilder jb = { buf, size, 0, 1, 0 };
+    if (buf && size) buf[0] = '\0';
+    json_append(&jb, "{\"homebrew\":[");
+    DIR *d = opendir(HOMEBREW_DIR);
+    if (d) {
+        struct dirent *ent;
+        int first = 1;
+        while ((ent = readdir(d))) {
+            if (ent->d_name[0] == '.') continue;
+            char full[640];
+            snprintf(full, sizeof(full), "%s/%s", HOMEBREW_DIR, ent->d_name);
+            struct stat st;
+            if (stat(full, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+            char esc[6 * 256];
+            json_escape_checked(&jb, ent->d_name, esc, sizeof(esc));
+            json_append(&jb, "%s\"%s\"", first ? "" : ",", esc);
+            first = 0;
+        }
+        closedir(d);
+    }
+    json_append(&jb, "]}");
+    return 0;
+}
+
 /* The journal names a validated sibling. If old exists but the public slot
  * does not, publication never happened: restore old. Otherwise the public
  * directory is the committed version. Staging and backups are then garbage.
