@@ -21,6 +21,10 @@ typedef struct RepoPayload {
     char release_notes[2048];
     char author[128];
     char details_url[1024];
+    /* Fork additions: firmware compatibility range shown as a badge. Optional in
+     * the feed (empty when unknown). Not part of upstream's v2 schema. */
+    char min_fw[64];
+    char max_fw[64];
 } RepoPayload;
 
 #define PLDMGR_PAYLOAD_DOWNLOAD_LIMIT ((size_t)512 * 1024 * 1024)

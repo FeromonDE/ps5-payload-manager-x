@@ -223,6 +223,9 @@ int parse_repository_payloads(const char *json, RepoPayload **out_items, size_t 
         }
         json_extract_string(p, end + 1, "author", item->author, sizeof(item->author));
         json_extract_string(p, end + 1, "details_url", item->details_url, sizeof(item->details_url));
+        /* Fork: firmware range (optional, empty when absent). */
+        json_extract_string(p, end + 1, "min_fw", item->min_fw, sizeof(item->min_fw));
+        json_extract_string(p, end + 1, "max_fw", item->max_fw, sizeof(item->max_fw));
 
         int notes_result = json_extract_string_prefix(p, end + 1, "release_notes",
                                                      item->release_notes, sizeof(item->release_notes));

@@ -213,6 +213,15 @@ const PayloadDetailPanel = ({
                 {String(active.version).startsWith('v') ? active.version : `v${active.version}`}
               </span>
             )}
+            {(active.min_fw || active.max_fw) && (
+              <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/30 font-extrabold text-xs sm:text-sm tracking-wider uppercase shrink-0">
+                {active.min_fw && active.max_fw
+                  ? `FW ${active.min_fw}–${active.max_fw}`
+                  : active.min_fw
+                  ? `FW ≥ ${active.min_fw}`
+                  : `FW ≤ ${active.max_fw}`}
+              </span>
+            )}
             {versions.length > 1 && (
               <select
                 value={activeKey}

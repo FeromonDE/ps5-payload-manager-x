@@ -700,6 +700,7 @@ static size_t repository_list_locked(char *buf, size_t size, int force_refresh) 
                 char last_upd_e[6 * 64], cat_e[6 * 128], csum_e[6 * 65];
                 char auth_e[6 * 128], det_url_e[6 * 1024], rn_e[6 * 2048], icon_e[6 * 128];
                 char src_pe[6 * 1024], sd_pe[6 * 1024];
+                char minfw_e[6 * 64], maxfw_e[6 * 64];
 
                 json_escape_checked(&jb, items[pi].id, id_pe, sizeof(id_pe));
                 json_escape_checked(&jb, items[pi].name, name_pe, sizeof(name_pe));
@@ -718,16 +719,20 @@ static size_t repository_list_locked(char *buf, size_t size, int force_refresh) 
                 json_escape_checked(&jb, items[pi].details_url, det_url_e, sizeof(det_url_e));
                 json_escape_checked(&jb, items[pi].release_notes, rn_e, sizeof(rn_e));
                 json_escape_checked(&jb, items[pi].icon_key, icon_e, sizeof(icon_e));
+                json_escape_checked(&jb, items[pi].min_fw, minfw_e, sizeof(minfw_e));
+                json_escape_checked(&jb, items[pi].max_fw, maxfw_e, sizeof(maxfw_e));
 
                 if (json_append(&jb, "%s    {\"id\":\"%s\",\"name\":\"%s\",\"filename\":\"%s\",\"description\":\"%s\","
                     "\"version\":\"%s\",\"checksum\":\"%s\",\"last_update\":\"%s\",\"url\":\"%s\","
                     "\"source\":\"%s\",\"source_direct\":\"%s\","
                     "\"source_id\":\"%s\",\"source_name\":\"%s\",\"category\":\"%s\","
-                    "\"author\":\"%s\",\"details_url\":\"%s\",\"release_notes\":\"%s\",\"icon_key\":\"%s\"}",
+                    "\"author\":\"%s\",\"details_url\":\"%s\",\"release_notes\":\"%s\",\"icon_key\":\"%s\","
+                    "\"min_fw\":\"%s\",\"max_fw\":\"%s\"}",
                     first_payload ? "" : ",\n",
                     id_pe, name_pe, filename_e, desc_e, ver_e, csum_e, last_upd_e, url_e,
                     src_pe, sd_pe,
-                    src_id_e, src_name_e, cat_e, auth_e, det_url_e, rn_e, icon_e) != 0) {
+                    src_id_e, src_name_e, cat_e, auth_e, det_url_e, rn_e, icon_e,
+                    minfw_e, maxfw_e) != 0) {
                     break;
                 }
                 first_payload = 0;
