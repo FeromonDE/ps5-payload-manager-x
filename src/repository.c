@@ -47,17 +47,24 @@ int download_to_file_limited(const char *url, const char *out_path, size_t limit
     DownloadOutput output = { fp, 0, limit };
     if (curl) {
 #define SET_OPTION(option, value) do { res = curl_easy_setopt(curl, option, value); if (res != CURLE_OK) goto finished; } while (0)
-        int is_catalog = (strcmp(url, REPOSITORY_SOURCE_URL) == 0);
+        /* Classify by the size cap, not the URL: manifests/icons/catalogs pass a
+         * small limit (<= manifest limit) and must stay responsive; payloads pass
+         * the large limit. The live v2 catalog gets the tightest budget. */
+        int is_small = (limit <= PLDMGR_MANIFEST_DOWNLOAD_LIMIT);
+        int is_live_catalog = (strcmp(url, REPOSITORY_SOURCE_URL) == 0);
         SET_OPTION(CURLOPT_URL, url);
         SET_OPTION(CURLOPT_NOSIGNAL, 1L);
-        SET_OPTION(CURLOPT_CONNECTTIMEOUT, is_catalog ? 3L : 10L);
-        if (is_catalog) {
-            /* Catalog JSON is small and must stay responsive. */
-            SET_OPTION(CURLOPT_TIMEOUT, 5L);
+        SET_OPTION(CURLOPT_CONNECTTIMEOUT, is_live_catalog ? 3L : 10L);
+        if (is_small) {
+            /* Catalog/manifest/icon JSON: fixed, bounded total timeout. */
+            SET_OPTION(CURLOPT_TIMEOUT, is_live_catalog ? 5L : 30L);
         } else {
             /* Payloads can be large (e.g. a ~470 MiB .exfat homebrew image). A
-             * fixed total timeout would kill a slow-but-progressing download, so
-             * abort only when the transfer stalls below 2 KB/s for 30s. */
+             * fixed short total timeout would kill a slow-but-progressing download,
+             * so bound the overall time from the size limit at a minimum ~256 KB/s
+             * (still ~34 min for the 512 MiB cap) and abort sooner if it stalls
+             * below 2 KB/s for 30s. Every download stays bounded. */
+            SET_OPTION(CURLOPT_TIMEOUT, (long)(limit / 262144) + 30);
             SET_OPTION(CURLOPT_LOW_SPEED_LIMIT, 2048L);
             SET_OPTION(CURLOPT_LOW_SPEED_TIME, 30L);
         }
