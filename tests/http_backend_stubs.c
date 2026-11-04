@@ -109,9 +109,9 @@ size_t repository_list_json(char *out, size_t size, int refresh) {
 size_t sources_multi_repository_list_json(char *out, size_t size, int refresh) {
     return repository_list_json(out, size, refresh);
 }
-int sources_repo_install(const char *url, const char *id, const char *mode,
-                        const char *replace, char *out, size_t size) {
-    test_mutation_calls++; (void)url; (void)id; (void)mode; (void)replace; json(out, size, "{\"ok\":true}"); return 0;
+int sources_repo_install(const char *url, const char *id, const char *want_filename,
+                        const char *mode, const char *replace, char *out, size_t size) {
+    test_mutation_calls++; (void)url; (void)id; (void)want_filename; (void)mode; (void)replace; json(out, size, "{\"ok\":true}"); return 0;
 }
 int sources_list_json(char *out, size_t size) { json(out, size, "{\"sources\":[]}"); return test_json_failure ? -1 : 0; }
 int sources_save(const char *data, size_t size) {

@@ -822,7 +822,7 @@ enum MHD_Result http_on_request(void *cls, struct MHD_Connection *conn,
         if (!alloc_response_buffer_small(&resp_buf))
             return send_out_of_memory(conn);
 
-        int rc = sources_repo_install(source_url, id, mode, replace_slot, resp_buf, SMALL_RESPONSE_BUFFER_SIZE);
+        int rc = sources_repo_install(source_url, id, filename, mode, replace_slot, resp_buf, SMALL_RESPONSE_BUFFER_SIZE);
         if (!resp_buf[0]) return send_serialization_error(conn, resp_buf);
         resp = create_buffer_response(strlen(resp_buf), (void *)resp_buf, MHD_RESPMEM_MUST_FREE);
         add_response_header(resp, "Content-Type", "application/json");

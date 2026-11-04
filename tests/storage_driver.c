@@ -102,7 +102,7 @@ static int operate(int which,char key[128]) {
     char json[4096];
     if(which==0)return upload("replace",key);
     if(which==1)return payload_mgr_usb_move(usb,"replace",0,json,sizeof(json));
-    return sources_repo_install(NULL,"fixture","replace",NULL,json,sizeof(json));
+    return sources_repo_install(NULL,"fixture",NULL,"replace",NULL,json,sizeof(json));
 }
 static void verify_repo(const char *bytes) {
     char key[128];CHECK(!slot_repo_key("fixture",REPOSITORY_SOURCE_URL,key,sizeof(key)));verify(key,bytes);
@@ -118,7 +118,7 @@ struct job { int index,rc,repo; const char *mode; char key[128],path[640]; };
 static void *worker(void *v) {
     struct job *j=v;char msg[256];
     if (j->repo) {
-        char json[4096]; j->rc=sources_repo_install(NULL,"fixture",j->mode,NULL,json,sizeof(json));
+        char json[4096]; j->rc=sources_repo_install(NULL,"fixture",NULL,j->mode,NULL,json,sizeof(json));
         if (!j->rc) j->rc=json_extract_string(json,json+strlen(json),"slot",j->key,sizeof(j->key));
         return NULL;
     }
@@ -164,10 +164,10 @@ int main(int argc, char **argv) {
     CHECK(!upload("keep_both",key));CHECK(strcmp(key,"local/safe"));verify(key,"new bytes");verify("local/safe","old bytes");
     CHECK(!payload_mgr_usb_move(usb,"keep_both",1,json,sizeof(json)));CHECK(!access(usb,F_OK));
     CHECK(!payload_mgr_usb_move(usb,"keep_both",0,json,sizeof(json)));CHECK(access(usb,F_OK));
-    seed_repo();CHECK(sources_repo_install(NULL,"fixture","new",NULL,json,sizeof(json))!=0);verify_repo("old bytes");
-    CHECK(!sources_repo_install(NULL,"fixture",NULL,NULL,json,sizeof(json)));verify_repo("new bytes");
-    seed_repo();CHECK(!sources_repo_install(NULL,"fixture","keep_both",NULL,json,sizeof(json)));verify_repo("old bytes");
-    CHECK(!sources_repo_install(NULL,"fixture",NULL,NULL,json,sizeof(json)));verify_repo("new bytes");
+    seed_repo();CHECK(sources_repo_install(NULL,"fixture",NULL,"new",NULL,json,sizeof(json))!=0);verify_repo("old bytes");
+    CHECK(!sources_repo_install(NULL,"fixture",NULL,NULL,NULL,json,sizeof(json)));verify_repo("new bytes");
+    seed_repo();CHECK(!sources_repo_install(NULL,"fixture",NULL,"keep_both",NULL,json,sizeof(json)));verify_repo("old bytes");
+    CHECK(!sources_repo_install(NULL,"fixture",NULL,NULL,NULL,json,sizeof(json)));verify_repo("new bytes");
     /* A cross-source replacement must not retire/remap the old source until
      * publication succeeds. Configuration atomicity is tested separately. */
     SlotMeta other={0};char other_key[128],other_dir[640];
@@ -176,9 +176,9 @@ int main(int argc, char **argv) {
     CHECK(!slot_repo_key("fixture",other.source_url,other_key,sizeof(other_key)));
     write_bytes(input,"old bytes");CHECK(!slot_commit_file(other_key,input,"replace",&other,0,key,sizeof(key)));
     seed_repo();autoload_updates=0;fail_op="rename";fail_at=3;
-    CHECK(sources_repo_install(NULL,"fixture","replace",other_key,json,sizeof(json))!=0);reset_fault();
+    CHECK(sources_repo_install(NULL,"fixture",NULL,"replace",other_key,json,sizeof(json))!=0);reset_fault();
     CHECK(autoload_updates==0);verify_repo("old bytes");verify(other_key,"old bytes");
-    CHECK(!sources_repo_install(NULL,"fixture","replace",other_key,json,sizeof(json)));verify_repo("new bytes");
+    CHECK(!sources_repo_install(NULL,"fixture",NULL,"replace",other_key,json,sizeof(json)));verify_repo("new bytes");
     snprintf(other_dir,sizeof(other_dir),"%s/%s",PAYLOADS_STORAGE_DIR,other_key);CHECK(access(other_dir,F_OK));
     CHECK(autoload_updates>0);
     /* Changing the filename must publish matching metadata and bytes together. */

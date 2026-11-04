@@ -32,7 +32,7 @@ int main(int argc,char **argv){
     snprintf(meta_path,sizeof(meta_path),"%s/%s/meta.json",PAYLOADS_STORAGE_DIR,key);
     if(compute_sha256_file(meta_path,before))return 3;
     strcpy(slot_dir,meta.slot_dir);
-    int rc=sources_repo_install(NULL,"fixture",NULL,NULL,json,sizeof(json));
+    int rc=sources_repo_install(NULL,"fixture",NULL,NULL,NULL,json,sizeof(json));
     if(compute_sha256_file(meta_path,after) || slot_read_meta(slot_dir,&meta) || compute_sha256_file(meta.payload_path,bodyhash))return 3;
     printf("{\"rc\":%d,\"first\":%d,\"retry\":%d,\"metadata_same\":%s,\"body_hash\":\"%s\"}\n",rc,first_calls,retry_calls,!strcmp(before,after)?"true":"false",bodyhash);
     return 0;

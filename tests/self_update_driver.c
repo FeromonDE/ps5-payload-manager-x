@@ -53,7 +53,7 @@ int main(int argc, char **argv) {
         printf("%d %s\n%s\n", found, version, path);
     } else if (!strcmp(argv[1], "install")) {
         if (argc < 3) return 2;
-        sources_repo_install(argv[2], argc > 4 ? argv[4] : "pldmgr", argc > 3 ? argv[3] : NULL, NULL, out, sizeof(out));
+        sources_repo_install(argv[2], argc > 4 ? argv[4] : "pldmgr", NULL, argc > 3 ? argv[3] : NULL, NULL, out, sizeof(out));
         puts(out);
     } else if (!strcmp(argv[1], "list")) {
         if (!payload_mgr_list_json(out, sizeof(out))) return 3;

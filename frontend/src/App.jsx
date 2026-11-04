@@ -573,6 +573,10 @@ function App() {
       setDownloadModal((prev) => ({ ...prev, progress: 30 }))
       let url = `/repository_install?id=${encodeURIComponent(payloadId)}`
       if (repoUrl) url += `&source_url=${encodeURIComponent(repoUrl)}`
+      // Install the SELECTED version: a payload can have several catalog rows
+      // under one id (same slot), so the filename disambiguates which one the
+      // backend installs. Without it the backend picks the first row for the id.
+      if (p.filename) url += `&filename=${encodeURIComponent(p.filename)}`
       if (options.mode) url += `&mode=${encodeURIComponent(options.mode)}`
       if (options.replaceSlot) url += `&replace_slot=${encodeURIComponent(options.replaceSlot)}`
 

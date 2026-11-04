@@ -27,9 +27,13 @@ size_t sources_icons_json(const char *source_id, char *buf, size_t size);
 int sources_clear_cache(void);
 
 /* Unified repository install pipeline.
- * Finds entry by id in source cache (refreshing if missing or on error).
+ * Finds entry by id in source cache (refreshing if missing or on error). When
+ * want_filename is non-empty, the specific catalog row with that filename is
+ * installed (lets the version picker install the selected version of a payload
+ * that has several); NULL/empty keeps the legacy "first row for this id" match.
  * Handles conflicts, mode=replace|keep_both, and downloads to slot/.part before commit. */
 int sources_repo_install(const char *source_url, const char *id,
+                         const char *want_filename,
                          const char *mode, const char *replace_slot,
                          char *out_json, size_t out_size);
 

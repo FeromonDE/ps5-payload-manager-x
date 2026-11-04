@@ -762,9 +762,11 @@ size_t sources_multi_repository_list_json(char *buf, size_t size, int force_refr
 }
 
 int sources_repo_install(const char *source_url, const char *id,
+                         const char *want_filename,
                          const char *mode, const char *replace_slot,
                          char *out_json, size_t out_size) {
     JsonListBuilder jb = { out_json, out_size, 0, 1, 0 };
+    int have_want_filename = (want_filename && want_filename[0]);
     if (!slot_mode_valid(mode)) {
         json_append(&jb, "{\"ok\":false,\"message\":\"Invalid storage mode\"}"); return -1;
     }
@@ -886,7 +888,8 @@ int sources_repo_install(const char *source_url, const char *id,
 
     int found_idx = -1;
     for (size_t i = 0; i < count; i++) {
-        if (strcmp(items[i].id, safe_id) == 0) {
+        if (strcmp(items[i].id, safe_id) == 0 &&
+            (!have_want_filename || strcmp(items[i].filename, want_filename) == 0)) {
             found_idx = (int)i;
             break;
         }
@@ -908,7 +911,8 @@ int sources_repo_install(const char *source_url, const char *id,
                 return -1;
             }
             for (size_t i = 0; i < count; i++) {
-                if (strcmp(items[i].id, safe_id) == 0) {
+                if (strcmp(items[i].id, safe_id) == 0 &&
+                    (!have_want_filename || strcmp(items[i].filename, want_filename) == 0)) {
                     found_idx = (int)i;
                     break;
                 }
