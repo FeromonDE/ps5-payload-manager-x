@@ -1062,6 +1062,24 @@ int sources_repo_install(const char *source_url, const char *id,
     strncpy(meta->author, entry->author, sizeof(meta->author) - 1);
     strncpy(meta->details_url, entry->details_url, sizeof(meta->details_url) - 1);
 
+    /* Replace a SPECIFIC installed version (fork multi-version UX): when the
+     * caller names an existing slot of this same id+source family to replace,
+     * install straight into that slot key rather than the id-derived base.
+     * Without this, replacing a suffixed "keep both" slot (base-2, base-3, ...)
+     * would funnel the new file into the base slot and could clobber a
+     * different installed version. A cross-source conflict names a slot under a
+     * DIFFERENT source hash, so it fails the family test and keeps the existing
+     * base-commit + retire-old-slot path below. */
+    if (is_mode_replace && replace_slot && replace_slot[0]) {
+        size_t base_len = strlen(target_slot);
+        if (strcmp(replace_slot, target_slot) == 0 ||
+            (strncmp(replace_slot, target_slot, base_len) == 0 && replace_slot[base_len] == '-')) {
+            snprintf(target_slot, sizeof(target_slot), "%s", replace_slot);
+            strncpy(meta->slot_key, target_slot, sizeof(meta->slot_key) - 1);
+            meta->slot_key[sizeof(meta->slot_key) - 1] = '\0';
+        }
+    }
+
     char committed_slot[128];
     /* An omitted mode preserves the established reinstall/update behavior;
      * explicit new is exclusive, and keep_both also works within one source. */

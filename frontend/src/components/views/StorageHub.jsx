@@ -3,7 +3,7 @@ import { CloudDownload, Upload, Package, Database, RefreshCw, Loader2, AlertTria
 import { useTranslation } from 'react-i18next'
 import { QRCodeSVG } from 'qrcode.react'
 import { cn, isPS5, isIOS } from '../../utils/helpers'
-import { getPayloadStatus, resolveSourceDisplayName, isRepositoryPayloadVisible } from '../../utils/payloadStatus'
+import { getPayloadStatus, resolveSourceDisplayName, isRepositoryPayloadVisible, isOfficialRepoUrl, normalizeUrl } from '../../utils/payloadStatus'
 import { slug, compareVersions } from '../../utils/versions'
 import { formatSyncTime } from '../../utils/syncTime'
 import PayloadName from '../ui/PayloadName'
@@ -98,6 +98,11 @@ const StorageHub = ({
   const selectedPayload = selectedPayloadProp !== undefined ? selectedPayloadProp : localSelectedPayload
   const setSelectedPayload = onSelectPayload || setLocalSelectedPayload
   const [savedScroll, setSavedScroll] = useState(0)
+  // Install-choice (fork multi-version UX): when a version of the same payload is
+  // already installed, ask whether to replace an existing one or keep both. Holds
+  // { payload, srcId, srcUrl, installedSlots } plus the slot the user picks to replace.
+  const [installChoice, setInstallChoice] = useState(null)
+  const [replaceTarget, setReplaceTarget] = useState(null)
 
   const handlePayloadSelect = (payloadData) => {
     const mainEl = document.querySelector('main')
@@ -197,7 +202,11 @@ const StorageHub = ({
           : enrichedSources)
 
     for (const src of candidateSources) {
-      const match = src.payloads?.find(
+      // Group by version so the resolved payload carries its sibling `.versions`
+      // (same slot id). Without this the detail panel receives a single raw entry
+      // and its version dropdown — gated on versions.length > 1 — never renders.
+      const grouped = groupByVersion(src.payloads || [])
+      const match = grouped.find(
         (candidate) =>
           (targetIdentifier && candidate.id === targetIdentifier) ||
           (targetIdentifier && candidate.filename === targetIdentifier) ||
@@ -268,6 +277,22 @@ const StorageHub = ({
     }
   }, [selectedPayload, resolvedPayloadData, loading, repoData, handleCloseDetail])
 
+  // All installed repo slots that belong to the same payload id + source as the
+  // one being installed. ".exfat" homebrew has no slot, so it's never matched.
+  const installedSlotsFor = (payload, srcUrl) => {
+    const targetId = payload?.id || slug(payload?.name || payload?.filename || '')
+    const srcNorm = normalizeUrl(srcUrl)
+    const official = isOfficialRepoUrl(srcNorm)
+    return (Array.isArray(items) ? items : []).filter(
+      (it) =>
+        it &&
+        it.kind === 'repo' &&
+        it.id === targetId &&
+        (normalizeUrl(it.source_url) === srcNorm ||
+          (official && isOfficialRepoUrl(it.source_url)))
+    )
+  }
+
   const handleInstallClick = (payload, srcId, srcUrl, statusInfo) => {
     // If there is an install conflict across repositories
     if (statusInfo?.hasConflict && statusInfo?.conflictSlot) {
@@ -282,8 +307,127 @@ const StorageHub = ({
       return
     }
 
+    // Fork multi-version UX: if a version of this payload is already installed
+    // from this source, ask whether to replace one or keep both. ".exfat"
+    // homebrew files (no slot) and fresh installs fall through to a plain install.
+    const isExfat = /\.exfat$/i.test(payload?.filename || '')
+    const installedSlots = isExfat ? [] : installedSlotsFor(payload, srcUrl)
+    if (installedSlots.length > 0) {
+      setReplaceTarget(installedSlots.length === 1 ? installedSlots[0].slot : null)
+      setInstallChoice({ payload, srcId, srcUrl, installedSlots })
+      return
+    }
+
     onInstall(payload, srcId, srcUrl)
   }
+
+  const closeInstallChoice = () => {
+    setInstallChoice(null)
+    setReplaceTarget(null)
+  }
+  const installChoiceSlots = installChoice?.installedSlots || []
+  const installChoiceMulti = installChoiceSlots.length > 1
+  const installChoiceName = installChoice
+    ? installChoice.payload.name || installChoice.payload.id || installChoice.payload.filename
+    : ''
+  const installChoiceNewVersion = installChoice?.payload?.version || ''
+  const slotVersionLabel = (s) =>
+    (String(s.version || '').startsWith('v') ? s.version : `v${s.version || '?'}`)
+
+  const installChoiceModal = (
+    <Modal
+      show={Boolean(installChoice)}
+      title={t("storage_hub.install_choice_title", "Already Installed")}
+      onClose={closeInstallChoice}
+      footer={
+        <div className="flex flex-col sm:flex-row w-full gap-3">
+          <button
+            type="button"
+            onClick={closeInstallChoice}
+            className="flex-1 py-3 px-4 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold uppercase text-sm transition-all"
+          >
+            {t("common.cancel", "Cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const c = installChoice
+              closeInstallChoice()
+              onInstall(c.payload, c.srcId, c.srcUrl, { mode: 'keep_both' })
+            }}
+            className="flex-1 py-3 px-4 rounded-xl bg-ps-blue hover:bg-ps-blue/80 text-white font-black uppercase text-sm transition-all shadow-lg"
+          >
+            {t("storage_hub.conflict_keep_both", "Keep both")}
+          </button>
+          <button
+            type="button"
+            disabled={!replaceTarget}
+            onClick={() => {
+              const c = installChoice
+              const slot = replaceTarget
+              closeInstallChoice()
+              onInstall(c.payload, c.srcId, c.srcUrl, { mode: 'replace', replaceSlot: slot })
+            }}
+            className="flex-1 py-3 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black uppercase text-sm transition-all shadow-lg disabled:opacity-40 disabled:pointer-events-none"
+          >
+            {t("storage_hub.conflict_replace", "Replace")}
+          </button>
+        </div>
+      }
+    >
+      {installChoice && (
+        <div className="space-y-4">
+          <p>
+            {installChoiceMulti
+              ? t(
+                  "storage_hub.install_choice_message_multi",
+                  "{{count}} versions of \"{{name}}\" are installed. Pick one to replace with {{newVersion}}, or keep them all and add this version alongside.",
+                  { count: installChoiceSlots.length, name: installChoiceName, newVersion: slotVersionLabel({ version: installChoiceNewVersion }) }
+                )
+              : t(
+                  "storage_hub.install_choice_message_single",
+                  "\"{{name}}\" {{installedVersion}} is already installed. Replace it with {{newVersion}}, or keep both.",
+                  {
+                    name: installChoiceName,
+                    installedVersion: slotVersionLabel(installChoiceSlots[0] || {}),
+                    newVersion: slotVersionLabel({ version: installChoiceNewVersion }),
+                  }
+                )}
+          </p>
+          {installChoiceMulti && (
+            <div className="space-y-2 max-h-56 overflow-y-auto">
+              {installChoiceSlots.map((s) => (
+                <label
+                  key={s.slot}
+                  className={cn(
+                    "flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors",
+                    replaceTarget === s.slot
+                      ? "bg-amber-500/10 border-amber-500/40"
+                      : "bg-white/5 border-white/10 hover:bg-white/10"
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="install-replace-target"
+                    value={s.slot}
+                    checked={replaceTarget === s.slot}
+                    onChange={() => setReplaceTarget(s.slot)}
+                    className="accent-amber-500"
+                  />
+                  <span className="flex flex-col">
+                    <span className="font-bold text-white">{slotVersionLabel(s)}</span>
+                    {s.filename && (
+                      <span className="font-mono text-xs text-zinc-500 truncate max-w-[260px]">{s.filename}</span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  )
 
   if (selectedPayload && !resolvedPayloadData && (loading || !repoData)) {
     return (
@@ -372,12 +516,15 @@ const StorageHub = ({
               )}
           </p>
         </Modal>
+
+        {installChoiceModal}
       </div>
     )
   }
 
   return (
     <div className="space-y-12 animate-in fade-in duration-300">
+      {installChoiceModal}
       {/* Conflict Modal */}
       <Modal
         show={Boolean(conflictPrompt)}
