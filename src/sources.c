@@ -1072,8 +1072,22 @@ int sources_repo_install(const char *source_url, const char *id,
      * base-commit + retire-old-slot path below. */
     if (is_mode_replace && replace_slot && replace_slot[0]) {
         size_t base_len = strlen(target_slot);
-        if (strcmp(replace_slot, target_slot) == 0 ||
-            (strncmp(replace_slot, target_slot, base_len) == 0 && replace_slot[base_len] == '-')) {
+        int same_family = (strcmp(replace_slot, target_slot) == 0);
+        if (!same_family &&
+            strncmp(replace_slot, target_slot, base_len) == 0 &&
+            replace_slot[base_len] == '-') {
+            /* The only legitimate suffix is a keep_both counter: '-' followed by
+             * digits only (slot_commit_file emits "%s-%d"). replace_slot arrives
+             * from an untrusted query parameter, so validate strictly — this
+             * stops a crafted value from smuggling path traversal ("..", "/")
+             * into the slot key we commit the payload into. */
+            const char *suf = replace_slot + base_len + 1;
+            same_family = (*suf != '\0');
+            for (const char *p = suf; *p; p++) {
+                if (*p < '0' || *p > '9') { same_family = 0; break; }
+            }
+        }
+        if (same_family) {
             snprintf(target_slot, sizeof(target_slot), "%s", replace_slot);
             strncpy(meta->slot_key, target_slot, sizeof(meta->slot_key) - 1);
             meta->slot_key[sizeof(meta->slot_key) - 1] = '\0';
