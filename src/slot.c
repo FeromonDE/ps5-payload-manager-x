@@ -166,6 +166,17 @@ int slot_is_homebrew_zip_name(const char *path) {
     return ext && strcasecmp(ext, ".zip") == 0;
 }
 
+/* The real .zip extractor lives in homebrew_zip.c (pulls in miniz). This WEAK
+ * fallback lets host tests that link slot.o — but not homebrew_zip.o + miniz —
+ * resolve the symbol referenced by sources.c / payload_mgr.c. The production
+ * build links homebrew_zip.o, whose strong definition overrides this one. */
+__attribute__((weak)) int slot_install_homebrew_zip(const char *filename, const char *source,
+                                                    char *msg_buf, size_t msg_buf_size) {
+    (void)filename; (void)source;
+    if (msg_buf && msg_buf_size) snprintf(msg_buf, msg_buf_size, "Zip extraction unavailable");
+    return -1;
+}
+
 /* Homebrew files are homebrew, not payloads/slots: install = copy the file into
  * HOMEBREW_DIR (/data/homebrew), flat, keeping its filename. Shared by the upload
  * and repository install paths. Consumes `source` on success. Returns 0 on success. */
