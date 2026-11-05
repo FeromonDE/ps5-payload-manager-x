@@ -59,6 +59,8 @@ const StorageHub = ({
   items = [],
   self = null,
   homebrewFiles = [],
+  startupFiles = [],
+  onSetStartup,
   payloads = [],
   onInstall,
   onDelete,
@@ -450,6 +452,8 @@ const StorageHub = ({
           isUpdate={resolvedPayloadData.isUpdate}
           isInstalling={isDetailInstalling}
           onDelete={onDelete}
+          startupFiles={startupFiles}
+          onSetStartup={onSetStartup}
           externalLinkUrl={externalLinkUrl}
           setExternalLinkUrl={setExternalLinkUrl}
           onClose={handleCloseDetail}

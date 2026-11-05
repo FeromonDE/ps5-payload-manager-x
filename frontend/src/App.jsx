@@ -59,6 +59,8 @@ function App() {
   const [items, setItems] = useState([])
   // Fork: filenames in /data/homebrew, so ".exfat" catalog entries show installed.
   const [homebrewFiles, setHomebrewFiles] = useState([])
+  // Fork: filenames set to always launch on pldmgrx start ("run on startup" services).
+  const [startupFiles, setStartupFiles] = useState([])
   const [selfUpdate, setSelfUpdate] = useState(null)
   const [usbPayloads, setUsbPayloads] = useState([])
   const [uploadConflictModal, setUploadConflictModal] = useState({ show: false, file: null, folderName: '' })
@@ -322,6 +324,19 @@ function App() {
     return false
   }, [api, addToast, t])
 
+  // Fork: toggle a payload as a "run on startup" service (always launched on boot,
+  // alongside/independent of autoload profiles).
+  const handleSetStartup = useCallback(async (filename, enabled) => {
+    if (!filename) return false
+    const ok = await api(`/startup_set?filename=${encodeURIComponent(filename)}&enabled=${enabled ? 1 : 0}`, { method: 'POST' })
+    if (ok) {
+      setStartupFiles(prev => enabled ? Array.from(new Set([...prev, filename])) : prev.filter(f => f !== filename))
+      return true
+    }
+    addToast(t("app.toasts.save_failed", "Save failed"), "error")
+    return false
+  }, [api, addToast, t])
+
   const handleRunProfile = useCallback(async (id) => {
     // Leave the picker immediately; the executing overlay takes over on next poll.
     setPickerDismissed(true)
@@ -398,6 +413,8 @@ function App() {
       // Fork: ".exfat" homebrew lives in /data/homebrew (no slot) — fetch the list
       // so those catalog entries can show an installed state.
       api('/homebrew_list').then(hb => { if (appAliveRef.current && Array.isArray(hb?.homebrew)) setHomebrewFiles(hb.homebrew) })
+      // Fork: "run on startup" services (always launched on boot, alongside autoload).
+      api('/startup_get').then(s => { if (appAliveRef.current && Array.isArray(s?.startup)) setStartupFiles(s.startup) })
 
       const rawUsb = data.usb || (data.payloads ? data.payloads.filter(p => p.startsWith('/mnt/usb')) : [])
       setUsbPayloads(rawUsb)
@@ -1136,6 +1153,8 @@ function App() {
               items={items}
               self={selfUpdate}
               homebrewFiles={homebrewFiles}
+              startupFiles={startupFiles}
+              onSetStartup={handleSetStartup}
               payloads={payloads}
               payloadMeta={payloadMeta}
               onInstall={handleInstall}

@@ -10,7 +10,9 @@ import {
   FileText,
   Trash2,
   Globe,
+  Power,
 } from 'lucide-react';
+import { cn } from '../../utils/helpers';
 import { parseMarkdown } from '../../utils/markdown';
 import { isGitHubUrl } from '../../utils/payloadStatus';
 import { useTranslation } from 'react-i18next';
@@ -75,6 +77,8 @@ const PayloadDetailPanel = ({
   onClose,
   onInstall,
   onDelete,
+  startupFiles = [],
+  onSetStartup,
   statusInfo,
   isInstalled,
   isUpdate,
@@ -386,6 +390,23 @@ const PayloadDetailPanel = ({
                 <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
                 <span>{t("payload_detail.installed", "Installed")}</span>
               </div>
+            );
+          })()}
+          {canRemove && onSetStartup && (() => {
+            const isStartup = Array.isArray(startupFiles) && startupFiles.includes(active.filename);
+            return (
+              <button type="button" disabled={isInstalling}
+                onClick={() => onSetStartup(active.filename, !isStartup)}
+                title={t("payload_detail.startup_hint", "Always launch this payload when Payload Manager starts (runs on boot, alongside autoload)")}
+                className={cn(
+                  "w-full sm:w-auto inline-flex items-center justify-center space-x-2.5 px-7 py-3.5 rounded-2xl font-extrabold text-base transition-colors border disabled:opacity-50 disabled:pointer-events-none",
+                  isStartup
+                    ? "bg-emerald-600/15 text-emerald-400 border-emerald-500/40 hover:bg-emerald-600 hover:text-white"
+                    : "bg-white/5 text-zinc-300 border-white/10 hover:bg-ps-blue hover:text-white hover:border-ps-blue"
+                )}>
+                <Power className="w-5 h-5 shrink-0" />
+                <span>{isStartup ? t("payload_detail.startup_on", "Runs on Startup") : t("payload_detail.startup_off", "Run on Startup")}</span>
+              </button>
             );
           })()}
           {canRemove && (

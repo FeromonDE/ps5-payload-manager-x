@@ -195,7 +195,10 @@ export function getPayloadStatus({ payload, srcUrl, items = [], sources = [], mu
       conflictSlot: null,
       alsoInstalledFrom: null,
       badge: installed ? 'installed' : null,
-      buttonAction: null,
+      // Not installed -> show Install; installed -> no button (grey "Installed").
+      // Without this a not-installed homebrew entry fell through to the panel's
+      // "Installed" fallback and could never be installed.
+      buttonAction: installed ? null : 'install',
     };
   }
 
