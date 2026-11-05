@@ -146,17 +146,24 @@ static int storage_copy(const char *source, const char *destination) {
     return rc || memcmp(expected, actual, sizeof(actual)) ? -1 : 0;
 }
 
-/* Homebrew container files (not .elf/.bin payloads): copied verbatim into
- * HOMEBREW_DIR and picked up by the console, so they get no slot. Keep this set
- * in sync with the mirror catalog contract and the frontend (helpers.js).
- * NOTE: .zip is intentionally excluded — it needs extraction, not a verbatim
- * copy, so it is a separate (pending) decision. */
+/* Homebrew container files (not .elf/.bin payloads): they get no slot. Most are
+ * copied verbatim into HOMEBREW_DIR; a .zip is EXTRACTED into it instead (it is a
+ * container for a raw game/homebrew folder the console consumes). Keep this set in
+ * sync with the mirror catalog contract and the frontend (helpers.js). */
 int slot_is_homebrew_name(const char *path) {
     if (!path) return 0;
     const char *ext = strrchr(path, '.');
     if (!ext) return 0;
     return strcasecmp(ext, ".exfat") == 0 || strcasecmp(ext, ".ffpkg") == 0 ||
-           strcasecmp(ext, ".ffpfs") == 0 || strcasecmp(ext, ".ffpfsc") == 0;
+           strcasecmp(ext, ".ffpfs") == 0 || strcasecmp(ext, ".ffpfsc") == 0 ||
+           strcasecmp(ext, ".zip") == 0;
+}
+
+/* A .zip homebrew entry is extracted (not verbatim-copied) on install. */
+int slot_is_homebrew_zip_name(const char *path) {
+    if (!path) return 0;
+    const char *ext = strrchr(path, '.');
+    return ext && strcasecmp(ext, ".zip") == 0;
 }
 
 /* Homebrew files are homebrew, not payloads/slots: install = copy the file into
@@ -189,29 +196,35 @@ int slot_install_homebrew(const char *filename, const char *source,
     return 0;
 }
 
-/* List the regular files currently in HOMEBREW_DIR as {"homebrew":["name",...]}
- * so the UI can show ".exfat" catalog entries as installed (they have no slot). */
+/* List installed homebrew as {"homebrew":["name",...]} so the UI can show
+ * catalog entries installed (they have no slot). Two sources: regular files in
+ * HOMEBREW_DIR (verbatim-copied .exfat/.ffpfsc/...), and zero-byte markers in
+ * HOMEBREW_ZIP_MARKER_DIR naming each extracted .zip (whose own file isn't kept). */
+static void homebrew_list_dir(JsonListBuilder *jb, const char *dir, int *first) {
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *ent;
+    while ((ent = readdir(d))) {
+        if (ent->d_name[0] == '.') continue;
+        char full[640];
+        snprintf(full, sizeof(full), "%s/%s", dir, ent->d_name);
+        struct stat st;
+        if (stat(full, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        char esc[6 * 256];
+        json_escape_checked(jb, ent->d_name, esc, sizeof(esc));
+        json_append(jb, "%s\"%s\"", *first ? "" : ",", esc);
+        *first = 0;
+    }
+    closedir(d);
+}
+
 int slot_homebrew_list_json(char *buf, size_t size) {
     JsonListBuilder jb = { buf, size, 0, 1, 0 };
     if (buf && size) buf[0] = '\0';
     json_append(&jb, "{\"homebrew\":[");
-    DIR *d = opendir(HOMEBREW_DIR);
-    if (d) {
-        struct dirent *ent;
-        int first = 1;
-        while ((ent = readdir(d))) {
-            if (ent->d_name[0] == '.') continue;
-            char full[640];
-            snprintf(full, sizeof(full), "%s/%s", HOMEBREW_DIR, ent->d_name);
-            struct stat st;
-            if (stat(full, &st) != 0 || !S_ISREG(st.st_mode)) continue;
-            char esc[6 * 256];
-            json_escape_checked(&jb, ent->d_name, esc, sizeof(esc));
-            json_append(&jb, "%s\"%s\"", first ? "" : ",", esc);
-            first = 0;
-        }
-        closedir(d);
-    }
+    int first = 1;
+    homebrew_list_dir(&jb, HOMEBREW_DIR, &first);
+    homebrew_list_dir(&jb, HOMEBREW_ZIP_MARKER_DIR, &first);
     json_append(&jb, "]}");
     return 0;
 }

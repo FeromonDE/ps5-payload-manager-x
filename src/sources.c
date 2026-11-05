@@ -1015,11 +1015,14 @@ int sources_repo_install(const char *source_url, const char *id,
         return jb.error ? -1 : 0;
     }
 
-    /* ".exfat" entries aren't payloads/slots — drop the verified file into
-     * /data/homebrew (flat) and return, bypassing the slot system entirely. */
+    /* Homebrew entries aren't payloads/slots — install the verified file into
+     * /data/homebrew (a .zip is extracted, everything else copied verbatim) and
+     * return, bypassing the slot system entirely. */
     if (slot_is_homebrew_name(entry->filename)) {
         char hb_msg[256];
-        int rc = slot_install_homebrew(entry->filename, part_path, hb_msg, sizeof(hb_msg));
+        int rc = slot_is_homebrew_zip_name(entry->filename)
+                   ? slot_install_homebrew_zip(entry->filename, part_path, hb_msg, sizeof(hb_msg))
+                   : slot_install_homebrew(entry->filename, part_path, hb_msg, sizeof(hb_msg));
         char hb_e[6 * 256];
         json_escape_checked(&jb, hb_msg, hb_e, sizeof(hb_e));
         free(entry);

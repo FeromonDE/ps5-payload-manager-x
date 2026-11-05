@@ -103,6 +103,10 @@
 /* Homebrew drop target: ".exfat" files are not payloads/slots — installing one
  * just copies it here (flat). Shared path (NOT data-root-scoped) by design. */
 #define HOMEBREW_DIR "/data/homebrew"
+/* Zero-byte markers (named by catalog filename) recording extracted .zip homebrew
+ * installs, so the UI can show them installed even though the .zip itself is not
+ * kept. Hidden (dot-dir) so the console's homebrew scan ignores it. */
+#define HOMEBREW_ZIP_MARKER_DIR HOMEBREW_DIR "/.pldmgrx_installed"
 #define REPOSITORY_SOURCE_URL                                                  \
   "https://bsk193.github.io/ps5-payloads-mirror-x/payloads_v2.json"
 #define LEGACY_REPOSITORY_SOURCE_URL                                           \

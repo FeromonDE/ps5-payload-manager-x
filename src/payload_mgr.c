@@ -363,9 +363,12 @@ int payload_mgr_import_to_storage_mode(const char *filename, const char *temp_pa
         return -1;
     }
 
-    /* ".exfat" uploads aren't payloads/slots — drop the file into /data/homebrew. */
+    /* Homebrew uploads aren't payloads/slots — install into /data/homebrew
+     * (a .zip is extracted, everything else copied verbatim). */
     if (slot_is_homebrew_name(filename)) {
-        int rc = slot_install_homebrew(filename, temp_path, msg_buf, msg_buf_size);
+        int rc = slot_is_homebrew_zip_name(filename)
+                   ? slot_install_homebrew_zip(filename, temp_path, msg_buf, msg_buf_size)
+                   : slot_install_homebrew(filename, temp_path, msg_buf, msg_buf_size);
         if (rc == 0 && out_slot && out_slot_size > 0) out_slot[0] = '\0';
         return rc;
     }

@@ -9,7 +9,7 @@ STRIP  := /opt/ps5-payload-sdk/bin/prospero-strip
 # Paths
 SDK      := /opt/ps5-payload-sdk
 TARGET   := $(SDK)/target
-INCLUDES := -Iinclude -I$(TARGET)/include
+INCLUDES := -Iinclude -Ithird_party/miniz -I$(TARGET)/include
 LIBS     := $(TARGET)/lib/libcurl.a \
             $(TARGET)/lib/libmbedtls.a \
             $(TARGET)/lib/libmbedx509.a \
@@ -24,7 +24,8 @@ SRCS := src/main.c src/http_server.c src/config.c src/log_server.c \
         src/sha256.c src/json_helpers.c src/repository.c src/sources.c \
         src/payload_mgr.c src/process_mgr.c src/profiles.c \
         src/ps5_launcher.c src/notification.c src/utils.c src/autoload.c \
-        src/app_installer.c src/history_mgr.c src/slot.c
+        src/app_installer.c src/history_mgr.c src/slot.c \
+        src/homebrew_zip.c third_party/miniz/miniz.c
 OBJS := $(SRCS:.c=.o)
 ELF  := pldmgr.elf
 
@@ -94,6 +95,7 @@ test-host:
 	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_storage_tests.py
 	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_autoload_tests.py
 	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_profiles_tests.py
+	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_homebrew_zip_tests.py
 	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_launcher_tests.py
 	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_process_tests.py
 	HOST_CC="$(HOST_CC)" $(PYTHON) tests/run_log_stream_tests.py

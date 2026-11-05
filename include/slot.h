@@ -91,12 +91,18 @@ int slot_version_compare(const char *v1, const char *v2);
 /* One-time migration on startup (payloads/.layout = 2) */
 int slot_migrate_legacy(void);
 
-/* ".exfat" files are homebrew, not payloads: slot_install_homebrew copies the
- * file into /data/homebrew (flat), consuming `source` on success. */
+/* Homebrew files are homebrew, not payloads. slot_install_homebrew copies the
+ * file verbatim into /data/homebrew (flat), consuming `source` on success. A
+ * .zip (slot_is_homebrew_zip_name) is EXTRACTED instead — slot_install_homebrew_zip
+ * unpacks it into /data/homebrew with zip-slip protection and records a marker. */
 int slot_is_homebrew_name(const char *path);
+int slot_is_homebrew_zip_name(const char *path);
 int slot_install_homebrew(const char *filename, const char *source,
                           char *msg_buf, size_t msg_buf_size);
-/* {"homebrew":[...]} list of files in /data/homebrew (for UI installed-state). */
+int slot_install_homebrew_zip(const char *filename, const char *source,
+                              char *msg_buf, size_t msg_buf_size);
+/* {"homebrew":[...]} list of installed homebrew (files in /data/homebrew plus
+ * extracted-.zip markers) for UI installed-state. */
 int slot_homebrew_list_json(char *buf, size_t size);
 
 /* Retrieve a complete valid legacy paths map and clear its file on success.

@@ -58,11 +58,11 @@ export const isSystemPayload = (filename) => {
   );
 };
 
-/* Fork: homebrew container files are copied verbatim into /data/homebrew (no
- * slot) and picked up by the console — the Jobee's Lair model. Mirrors the
- * backend slot_is_homebrew_name() set. .zip is intentionally excluded (it needs
- * extraction, not a verbatim copy — a separate pending decision). */
-export const HOMEBREW_EXTENSIONS = ['.exfat', '.ffpkg', '.ffpfs', '.ffpfsc'];
+/* Fork: homebrew container files install to /data/homebrew (no slot) and are
+ * picked up by the console — the Jobee's Lair model. Mirrors the backend
+ * slot_is_homebrew_name() set. Most are copied verbatim; a .zip is extracted
+ * there (its install is tracked by a marker named like the .zip). */
+export const HOMEBREW_EXTENSIONS = ['.exfat', '.ffpkg', '.ffpfs', '.ffpfsc', '.zip'];
 export const isHomebrewFile = (name) =>
   typeof name === 'string' && HOMEBREW_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
 export const UPLOAD_ACCEPT = ['.elf', '.bin', ...HOMEBREW_EXTENSIONS].join(',');

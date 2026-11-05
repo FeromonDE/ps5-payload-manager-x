@@ -530,7 +530,7 @@ function App() {
     const ext = file.name.split('.').pop().toLowerCase()
     if (ext !== 'elf' && ext !== 'bin' && !isHomebrewFile(file.name)) {
       addToast(
-        t("app.toasts.unsupported_file", "Unsupported file type. Only .elf, .bin and homebrew files (.exfat, .ffpkg, .ffpfs, .ffpfsc) are allowed."),
+        t("app.toasts.unsupported_file", "Unsupported file type. Only .elf, .bin and homebrew files (.exfat, .ffpkg, .ffpfs, .ffpfsc, .zip) are allowed."),
         "error"
       )
       return
