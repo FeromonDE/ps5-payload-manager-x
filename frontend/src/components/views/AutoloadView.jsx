@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from 'react'
 import { RefreshCw, ArrowLeft, ArrowRight, Activity, Zap, ChevronUp, ChevronDown, Trash2, CheckCircle2, Plus, Pencil, Play, Layers, ListChecks } from 'lucide-react'
-import { cn, isPS5, isSystemPayload, payloadBaseName, fwCompatible } from '../../utils/helpers'
+import { cn, isPS5, isSystemPayload, payloadBaseName } from '../../utils/helpers'
 import { useTranslation } from 'react-i18next'
 import PayloadName from '../ui/PayloadName'
 import Modal from '../ui/Modal'
+import { saveProfilesOnExit } from '../../utils/mutationRequest'
 
 /* Serialize for change-detection so we only persist real edits. */
 const serialize = (profiles) => JSON.stringify(
   profiles.map(p => ({ id: p.id, name: p.name, enabled: !!p.enabled, list: p.list.join(',') }))
 )
 
-const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, consoleFw = '', onSaveProfiles, onRunProfile, onToast, onRedirect }) => {
+const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, onSaveProfiles, onRunProfile, onToast, onRedirect }) => {
   const { t } = useTranslation()
   const metaFor = (name) => payloadMeta?.[name] || {}
-  const fwBad = (name) => !fwCompatible(metaFor(name).min_fw, metaFor(name).max_fw, consoleFw)
 
   const [profiles, setProfiles] = useState([])
   const [editingId, setEditingId] = useState(null) // null = overview
@@ -25,6 +25,18 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
   const [isInitialized, setIsInitialized] = useState(false)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const lastSyncedRef = React.useRef('')
+
+  // Latest values for the debounce/unmount/unload flushes, kept current in an
+  // effect so the flush effects never re-subscribe (and refs are only written
+  // outside render).
+  const profilesRef = React.useRef(profiles)
+  const initializedRef = React.useRef(isInitialized)
+  const saveRef = React.useRef(onSaveProfiles)
+  useEffect(() => {
+    profilesRef.current = profiles
+    initializedRef.current = isInitialized
+    saveRef.current = onSaveProfiles
+  })
 
   // Sync in from props (App owns the canonical copy for the startup picker). This
   // one-time-per-change prop->state mirror is gated on [incomingProfiles], so the
@@ -38,7 +50,11 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
     }
   }, [incomingProfiles])
 
-  // Debounced auto-save
+  // Debounced auto-save. onSaveProfiles is read through a ref so this effect
+  // depends ONLY on the profile data. Previously onSaveProfiles was a dependency;
+  // it closes over i18n's `t` and so changed identity on every parent re-render
+  // (the status poll re-renders ~once a second), which re-ran this effect and
+  // cleared the debounce timer before it could fire — so edits were never saved.
   useEffect(() => {
     if (!isInitialized) return
     const current = serialize(profiles)
@@ -46,39 +62,47 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
 
     const timer = setTimeout(async () => {
       setSaving(true)
-      const success = await onSaveProfiles(profiles)
+      const success = await saveRef.current(profiles)
       if (success) {
         lastSyncedRef.current = current
         setSaved(true)
         setTimeout(() => setSaved(false), 2000)
       }
       setSaving(false)
-    }, 1200)
+    }, 500)
 
     return () => clearTimeout(timer)
-  }, [profiles, isInitialized, onSaveProfiles])
+  }, [profiles, isInitialized])
 
-  // Keep latest values current for the unmount flush below without making the
-  // flush effect re-run on every change. Updated in an effect (not during
-  // render) so refs are only touched outside render.
-  const profilesRef = React.useRef(profiles)
-  const initializedRef = React.useRef(isInitialized)
-  const saveRef = React.useRef(onSaveProfiles)
-  useEffect(() => {
-    profilesRef.current = profiles
-    initializedRef.current = isInitialized
-    saveRef.current = onSaveProfiles
-  })
-
-  // Flush a pending debounced save when the editor unmounts (navigating away,
-  // or the boot picker taking over) so edits made inside the 1.2s debounce
-  // window are persisted — otherwise a fresh profile created just before leaving
-  // or rebooting is silently lost ("profiles vanish after restart").
+  // Flush a pending save when the editor unmounts (navigating away, or the boot
+  // picker taking over).
   useEffect(() => () => {
     if (!initializedRef.current) return
     const current = serialize(profilesRef.current)
     if (current !== lastSyncedRef.current) {
       try { saveRef.current(profilesRef.current) } catch { /* best effort on unmount */ }
+    }
+  }, [])
+
+  // Flush on page teardown (F5 / tab close) via a keepalive beacon, so a profile
+  // created just before a reload survives even inside the debounce window.
+  useEffect(() => {
+    const flush = () => {
+      if (!initializedRef.current) return
+      const current = serialize(profilesRef.current)
+      if (current === lastSyncedRef.current) return
+      saveProfilesOnExit(JSON.stringify({
+        profiles: profilesRef.current.map(p => ({
+          id: p.id, name: p.name, enabled: !!p.enabled, list: p.list.join(','),
+        })),
+      }))
+      lastSyncedRef.current = current
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
     }
   }, [])
 
@@ -203,7 +227,7 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
                   isBlocked ? "opacity-40 cursor-not-allowed" : "bg-white/[0.03] hover:border-ps-blue group"
                 )}
               >
-                <PayloadName path={p} name={metaFor(p).display_name || null} version={metaFor(p).version || null} minFw={metaFor(p).min_fw || null} maxFw={metaFor(p).max_fw || null} fwIncompatible={fwBad(p)} className={cn("text-xl", isBlocked ? "text-zinc-500" : "text-white")} stacked />
+                <PayloadName path={p} displayName={metaFor(p).display_name || null} version={metaFor(p).version || null} className={cn("text-xl", isBlocked ? "text-zinc-500" : "text-white")} stacked />
                 <ArrowRight className={cn("w-6 h-6 transition-all shrink-0 mt-1", isBlocked ? "text-zinc-800" : "text-zinc-500 group-hover:text-ps-blue group-hover:translate-x-2")} />
               </button>
             )
@@ -268,7 +292,7 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
                 <span className="text-gray-500 text-[12px] font-black">{i + 1}</span>
               </div>
               <div className="flex items-center min-w-0 pl-2">
-                <PayloadName path={p} name={metaFor(p).display_name || null} version={metaFor(p).version || null} minFw={metaFor(p).min_fw || null} maxFw={metaFor(p).max_fw || null} fwIncompatible={fwBad(p)} className="text-white" stacked />
+                <PayloadName path={p} displayName={metaFor(p).display_name || null} version={metaFor(p).version || null} className="text-white" stacked />
               </div>
               <div className="flex items-center space-x-2">
                 <button onClick={() => moveUp(i)} disabled={i === 0} className="p-2 bg-white/10 text-zinc-400 hover:bg-ps-blue hover:text-white rounded-xl disabled:opacity-20">

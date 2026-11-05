@@ -13,15 +13,25 @@ export function mutationFetch(url, options = {}) {
 
 // Beacons cannot set custom headers. The server accepts them only with a
 // matching browser Origin/Referer. Queue failures use the marked fetch path.
-export function saveConfigOnExit(body) {
+function saveOnExit(url, body) {
   try {
     if (typeof navigator !== 'undefined' && navigator.sendBeacon &&
-        navigator.sendBeacon('/set_config', new Blob([body], { type: 'application/json' }))) {
+        navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) {
       return true
     }
   } catch { /* fall through to keepalive fetch */ }
-  mutationFetch('/set_config', {
+  mutationFetch(url, {
     headers: { 'Content-Type': 'application/json' }, body, keepalive: true,
   }).catch(() => {})
   return false
+}
+
+export function saveConfigOnExit(body) {
+  return saveOnExit('/set_config', body)
+}
+
+// Persist autoload profiles when the page is being torn down (F5, tab close),
+// so a profile created just before a reload is not lost inside the debounce.
+export function saveProfilesOnExit(body) {
+  return saveOnExit('/profiles_set', body)
 }
