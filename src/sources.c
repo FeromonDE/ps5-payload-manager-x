@@ -953,7 +953,7 @@ int sources_repo_install(const char *source_url, const char *id,
     }
     const char *ext = strrchr(entry->filename, '.');
     if (!ext || (strcasecmp(ext, ".elf") != 0 && strcasecmp(ext, ".bin") != 0 &&
-                 strcasecmp(ext, ".exfat") != 0)) {
+                 !slot_is_homebrew_name(entry->filename))) {
         free(entry);
         json_append(&jb, "{\"ok\":false,\"message\":\"Unsupported file extension in repository\"}");
         return -1;

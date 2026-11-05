@@ -146,13 +146,20 @@ static int storage_copy(const char *source, const char *destination) {
     return rc || memcmp(expected, actual, sizeof(actual)) ? -1 : 0;
 }
 
+/* Homebrew container files (not .elf/.bin payloads): copied verbatim into
+ * HOMEBREW_DIR and picked up by the console, so they get no slot. Keep this set
+ * in sync with the mirror catalog contract and the frontend (helpers.js).
+ * NOTE: .zip is intentionally excluded — it needs extraction, not a verbatim
+ * copy, so it is a separate (pending) decision. */
 int slot_is_homebrew_name(const char *path) {
     if (!path) return 0;
     const char *ext = strrchr(path, '.');
-    return ext && strcasecmp(ext, ".exfat") == 0;
+    if (!ext) return 0;
+    return strcasecmp(ext, ".exfat") == 0 || strcasecmp(ext, ".ffpkg") == 0 ||
+           strcasecmp(ext, ".ffpfs") == 0 || strcasecmp(ext, ".ffpfsc") == 0;
 }
 
-/* ".exfat" files are homebrew, not payloads/slots: install = copy the file into
+/* Homebrew files are homebrew, not payloads/slots: install = copy the file into
  * HOMEBREW_DIR (/data/homebrew), flat, keeping its filename. Shared by the upload
  * and repository install paths. Consumes `source` on success. Returns 0 on success. */
 int slot_install_homebrew(const char *filename, const char *source,

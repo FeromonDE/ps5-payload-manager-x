@@ -8,7 +8,7 @@
   "app.modals.delete_payload.title": "Delete Payload",
   "app.modals.delete_payload.message": "Are you sure you want to remove {{fileName}}?",
   "app.toasts.payload_removed": "{{fileName}} removed",
-  "app.toasts.unsupported_file": "Unsupported file type. Only .elf, .bin and .exfat files are allowed.",
+  "app.toasts.unsupported_file": "Unsupported file type. Only .elf, .bin and homebrew files (.exfat, .ffpkg, .ffpfs, .ffpfsc) are allowed.",
   "app.modals.overwrite.title": "Overwrite Payload",
   "app.modals.overwrite.folder_exists": "A different version of this payload exists in the \"{{folderName}}\" folder. Overwrite it?",
   "app.toasts.upload_failed": "Upload failed",

@@ -24,7 +24,7 @@ import { apiFetch, mutationFetch, saveConfigOnExit } from './utils/mutationReque
 import { useRepository } from './contexts/RepositoryContext'
 
 // Utilities
-import { cn, isPS5, isSystemPayload, parsePayloadName, formatSourceTag } from './utils/helpers'
+import { cn, isPS5, isSystemPayload, parsePayloadName, formatSourceTag, isHomebrewFile } from './utils/helpers'
 import { slug } from './utils/versions'
 import { resolveSourceDisplayName, isOfficialSource } from './utils/payloadStatus'
 
@@ -528,9 +528,9 @@ function App() {
     if (!file) return
 
     const ext = file.name.split('.').pop().toLowerCase()
-    if (ext !== 'elf' && ext !== 'bin' && ext !== 'exfat') {
+    if (ext !== 'elf' && ext !== 'bin' && !isHomebrewFile(file.name)) {
       addToast(
-        t("app.toasts.unsupported_file", "Unsupported file type. Only .elf, .bin and .exfat files are allowed."),
+        t("app.toasts.unsupported_file", "Unsupported file type. Only .elf, .bin and homebrew files (.exfat, .ffpkg, .ffpfs, .ffpfsc) are allowed."),
         "error"
       )
       return

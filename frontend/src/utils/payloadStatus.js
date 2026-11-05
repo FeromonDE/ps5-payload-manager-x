@@ -1,5 +1,5 @@
 import { compareVersions, slug } from './versions.js';
-import { isSystemPayload } from './helpers.js';
+import { isSystemPayload, isHomebrewFile } from './helpers.js';
 
 export const OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads_v2.json';
 export const LEGACY_OFFICIAL_REPOSITORY_URL = 'https://bsk193.github.io/ps5-payloads-mirror-x/payloads.json';
@@ -178,10 +178,12 @@ export function getPayloadStatus({ payload, srcUrl, items = [], sources = [], mu
 
   const targetId = payload.id || slug(payload.name || payload.filename);
 
-  // Fork: ".exfat" homebrew installs to /data/homebrew (no slot). Installed state
-  // is simply whether that file is present; it carries no version/update tracking.
+  // Fork: homebrew files (.exfat/.ffpkg/.ffpfs/.ffpfsc) install to /data/homebrew
+  // (no slot). Installed state is whether that exact filename is present. Versions
+  // with distinct filenames are surfaced by the version picker (install the newest
+  // to "update"); a same-filename checksum-based update badge is a later addition.
   const hbName = payload.filename || '';
-  if (/\.exfat$/i.test(hbName)) {
+  if (isHomebrewFile(hbName)) {
     const installed = Array.isArray(homebrewFiles) && homebrewFiles.includes(hbName);
     return {
       status: installed ? 'installed' : 'not_installed',

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useLayoutEffect, useRef, useCallba
 import { CloudDownload, Upload, Package, Database, RefreshCw, Loader2, AlertTriangle, HardDrive, Usb, ChevronDown, Globe, Search, ArrowUpDown, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { QRCodeSVG } from 'qrcode.react'
-import { cn, isPS5, isIOS } from '../../utils/helpers'
+import { cn, isPS5, isIOS, isHomebrewFile, UPLOAD_ACCEPT } from '../../utils/helpers'
 import { getPayloadStatus, resolveSourceDisplayName, isRepositoryPayloadVisible, isOfficialRepoUrl, normalizeUrl } from '../../utils/payloadStatus'
 import { slug, compareVersions } from '../../utils/versions'
 import { formatSyncTime } from '../../utils/syncTime'
@@ -308,10 +308,10 @@ const StorageHub = ({
     }
 
     // Fork multi-version UX: if a version of this payload is already installed
-    // from this source, ask whether to replace one or keep both. ".exfat"
-    // homebrew files (no slot) and fresh installs fall through to a plain install.
-    const isExfat = /\.exfat$/i.test(payload?.filename || '')
-    const installedSlots = isExfat ? [] : installedSlotsFor(payload, srcUrl)
+    // from this source, ask whether to replace one or keep both. Homebrew files
+    // (no slot) and fresh installs fall through to a plain install.
+    const isHomebrew = isHomebrewFile(payload?.filename || '')
+    const installedSlots = isHomebrew ? [] : installedSlotsFor(payload, srcUrl)
     if (installedSlots.length > 0) {
       setReplaceTarget(installedSlots.length === 1 ? installedSlots[0].slot : null)
       setInstallChoice({ payload, srcId, srcUrl, installedSlots })
@@ -689,7 +689,7 @@ const StorageHub = ({
               title={t("storage_hub.upload_btn", "Upload ELF Payload")}
             >
               <Upload className="w-6 h-6" />
-              <input type="file" className="hidden" onChange={onUpload} accept={isIOS ? undefined : ".elf,.bin,.exfat"} />
+              <input type="file" className="hidden" onChange={onUpload} accept={isIOS ? undefined : UPLOAD_ACCEPT} />
             </label>
           )}
         </div>
