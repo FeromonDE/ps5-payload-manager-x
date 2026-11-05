@@ -130,7 +130,23 @@ function App() {
   })
   const [storageScrollTarget, setStorageScrollTarget] = useState(null)
   const [showLogs, setShowLogs] = useState(false)
-  const payloadMeta = useMemo(() => ({}), [])
+  // Map each installed payload filename -> its display metadata so the Autoload
+  // profile editor can show the payload's Display name (not the raw filename).
+  // Built from installed slots (which carry the catalog `name`/`version`).
+  const payloadMeta = useMemo(() => {
+    const m = {}
+    for (const it of items) {
+      if (it && it.filename && !m[it.filename]) {
+        m[it.filename] = {
+          display_name: it.name || null,
+          version: it.version || null,
+          min_fw: it.min_fw || null,
+          max_fw: it.max_fw || null,
+        }
+      }
+    }
+    return m
+  }, [items])
 
   const { navigate, handleSelectPayload, handleClosePayload } = useHistoryNavigation({
     view,

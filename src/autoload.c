@@ -249,12 +249,14 @@ static void *autoload_worker(void *argument) {
     SequenceEntry *entries=NULL; size_t count=0;
     char list[4096]={0};
     PldmgrConfig cfg; config_read(&cfg);
-    if (!cfg.autoload_enabled) { finish(AUTOLOAD_DISABLED); return NULL; }
 
     /* ── Fork: resolve what to run (manual profile / enabled profile / picker /
-     * upstream default), then launch always-run startup payloads. The no-profile,
-     * no-startup, non-forced path leaves sequence_path = AUTOLOAD_CONFIG_PATH and
-     * launches nothing, so it is byte-identical to upstream. ─────────────────── */
+     * upstream default), then launch always-run startup payloads. Profiles are
+     * the fork's own autoload: an enabled profile runs, and the boot picker shows
+     * when profiles exist but none is enabled — both INDEPENDENT of the legacy
+     * upstream `autoload_enabled` toggle (which defaults off). Only the no-profile
+     * fallback to the upstream autoload.txt sequence stays gated, so with no
+     * profiles and the toggle off this stays byte-identical to upstream (idle). ── */
     launched_reset();
     int forced = forced_run;
     forced_run = 0;
@@ -269,23 +271,30 @@ static void *autoload_worker(void *argument) {
         ProfileEntry *arr = calloc(MAX_PROFILES, sizeof(ProfileEntry));
         int pcount = 0, active = -1;
         if (arr) { profiles_load(arr, &pcount); active = profiles_active_index(arr, pcount); }
+        int have_sequence = 1;
         if (active >= 0) {
+            /* An enabled profile is the fork's own autoload; run it regardless of
+             * the legacy autoload_enabled toggle. */
             profiles_write_sequence(arr[active].list);
             sequence_path = PROFILE_SCRATCH_PATH;
             pldmgr_log("[Autoload] Enabled profile: %s\n", arr[active].name);
         } else if (pcount > 0) {
+            /* Profiles exist but none enabled: show the boot picker (also
+             * independent of autoload_enabled) so the user can choose or skip. */
             picker_active = 1; /* set before startup so the status poll keeps the picker visible */
             pldmgr_log("[Autoload] No enabled profile - startup picker (%d profiles).\n", pcount);
+        } else if (cfg.autoload_enabled) {
+            sequence_path = AUTOLOAD_CONFIG_PATH; /* upstream default sequence (gated) */
         } else {
-            sequence_path = AUTOLOAD_CONFIG_PATH; /* upstream default sequence */
+            have_sequence = 0; /* no profiles + legacy autoload off: nothing to run */
         }
         if (arr) free(arr);
 
         launch_startup_payloads();
 
-        /* Picker: do not run a sequence; stay idle so the frontend can offer the
-         * selection. run_profile() takes over when the user picks one. */
-        if (picker_active) { finish(AUTOLOAD_DISABLED); return NULL; }
+        /* Picker, or nothing to run: do not run a sequence; stay idle so the
+         * frontend can offer the selection. run_profile() takes over on a pick. */
+        if (picker_active || !have_sequence) { finish(AUTOLOAD_DISABLED); return NULL; }
     }
 
     int parsed=read_sequence(&entries,&count,list);

@@ -58,6 +58,30 @@ const AutoloadView = ({ payloads, profiles: incomingProfiles, payloadMeta = {}, 
     return () => clearTimeout(timer)
   }, [profiles, isInitialized, onSaveProfiles])
 
+  // Keep latest values current for the unmount flush below without making the
+  // flush effect re-run on every change. Updated in an effect (not during
+  // render) so refs are only touched outside render.
+  const profilesRef = React.useRef(profiles)
+  const initializedRef = React.useRef(isInitialized)
+  const saveRef = React.useRef(onSaveProfiles)
+  useEffect(() => {
+    profilesRef.current = profiles
+    initializedRef.current = isInitialized
+    saveRef.current = onSaveProfiles
+  })
+
+  // Flush a pending debounced save when the editor unmounts (navigating away,
+  // or the boot picker taking over) so edits made inside the 1.2s debounce
+  // window are persisted — otherwise a fresh profile created just before leaving
+  // or rebooting is silently lost ("profiles vanish after restart").
+  useEffect(() => () => {
+    if (!initializedRef.current) return
+    const current = serialize(profilesRef.current)
+    if (current !== lastSyncedRef.current) {
+      try { saveRef.current(profilesRef.current) } catch { /* best effort on unmount */ }
+    }
+  }, [])
+
   const editing = profiles.find(p => p.id === editingId) || null
   const activeProfile = profiles.find(p => p.enabled) || null
 
