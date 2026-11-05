@@ -60,8 +60,13 @@ static int parse_profiles(const char *json, ProfileEntry *out, int *count) {
 
     const char *p = arr + 1;
     while (c < MAX_PROFILES && (p = strchr(p, '{')) != NULL) {
-        const char *end = strchr(p, '}');
-        if (!end) break;
+        const char *brace = strchr(p, '}');
+        if (!brace) break;
+        /* json_extract() is a strict object parser: its [start, end) range must
+         * INCLUDE the closing brace (it only accepts '}' while p < end), so end
+         * is one past the brace. Passing the brace position itself made every
+         * field return JSON_STRING_INVALID and silently dropped every profile. */
+        const char *end = brace + 1;
 
         char id[64] = "", name[128] = "", list[PROFILE_LIST_MAX] = "";
         json_extract_string(p, end, "id",   id,   sizeof(id));
@@ -77,7 +82,7 @@ static int parse_profiles(const char *json, ProfileEntry *out, int *count) {
             out[c].enabled = enabled;
             c++;
         }
-        p = end + 1;
+        p = end;
     }
 
     enforce_single_enabled(out, c);
