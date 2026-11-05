@@ -41,10 +41,18 @@ const groupByVersion = (list) => {
     const sorted = [...group].sort((a, b) =>
       compareVersions(b.version, a.version, b.last_update, a.last_update)
     )
-    const rep =
-      sorted.find((v) => v.isInstalled) ||
-      sorted.find((v) => !isExperimentalEntry(v)) ||
-      sorted[0]
+    // Representative = the most recently PUBLISHED version (by last_update),
+    // falling back to the version-newest (pool[0]) when dates tie or are missing.
+    // This keeps the newest version installable by default even when an older one
+    // is already installed (so you don't have to remove the old one first), and it
+    // handles odd version strings (e.g. "native-v2.0.5") that sort below "1.7.0".
+    const stable = sorted.filter((v) => !isExperimentalEntry(v))
+    const pool = stable.length ? stable : sorted
+    const rep = pool.reduce((best, v) => {
+      const bd = String(best.last_update || '')
+      const vd = String(v.last_update || '')
+      return vd && vd > bd ? v : best
+    }, pool[0])
     out.push({
       ...rep,
       versions: sorted,
