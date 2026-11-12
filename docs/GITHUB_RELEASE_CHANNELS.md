@@ -18,7 +18,8 @@ Releases. It is not limited to ShadowMountPlus.
 ## Setup after merging into main
 
 1. Enable GitHub Actions and permit workflows to write repository contents.
-2. Run Actions -> Refresh GitHub Payload Releases -> Run workflow once.
+2. On merge, a push-triggered workflow attempts the first catalog refresh automatically.
+   You can also run Actions -> Refresh GitHub Payload Releases -> Run workflow manually.
 3. Once payloads_prereleases.json is published, add this URL in
    Payload Manager X -> Settings -> Manage Sources -> Add Source:
 
