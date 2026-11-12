@@ -106,11 +106,34 @@ const PayloadDetailPanel = ({
     ? payload.versions
     : [payload];
   const versionKey = (v) => (v && (v.filename || v.version || v.id)) || '';
-  // Defaults to the representative (payload). No reset-effect needed: the panel
-  // is keyed on the payload identity by its parent, so selecting a different
-  // card remounts it and re-runs this initializer.
+  // Release channel is a display/install filter, not an auto-install option.
+  const channelStorageKey = 'pldmgrx-release-channel:' + (srcUrl || '') + ':' +
+    (payload.id || payload.name || payload.filename);
+  const [releaseChannel, setReleaseChannel] = useState(() => {
+    try {
+      return localStorage.getItem(channelStorageKey) || 'all';
+    } catch {
+      return 'all';
+    }
+  });
+  const isExperimentalVersion = (v) =>
+    String(v.channel || '').toLowerCase() === 'experimental';
+  const visibleVersions = versions.filter((v) =>
+    releaseChannel === 'all' ||
+    (releaseChannel === 'experimental' ? isExperimentalVersion(v) : !isExperimentalVersion(v))
+  );
+  // Never leave a payload without selectable versions if its channel is empty.
+  const channelVersions = visibleVersions.length ? visibleVersions : versions;
   const [activeKey, setActiveKey] = useState(() => versionKey(payload));
-  const active = versions.find((v) => versionKey(v) === activeKey) || payload;
+  const active = channelVersions.find((v) => versionKey(v) === activeKey) || channelVersions[0] || payload;
+  const changeReleaseChannel = (value) => {
+    setReleaseChannel(value);
+    try { localStorage.setItem(channelStorageKey, value); } catch { /* browser storage disabled */ }
+    const filtered = versions.filter((v) =>
+      value === 'all' || (value === 'experimental' ? isExperimentalVersion(v) : !isExperimentalVersion(v))
+    );
+    setActiveKey(versionKey((filtered.length ? filtered : versions)[0] || payload));
+  };
   const activeStatus = active.statusInfo || statusInfo;
   const activeInstalled = active.isInstalled !== undefined ? active.isInstalled : isInstalled;
   const activeUpdate = active.isUpdate !== undefined ? active.isUpdate : isUpdate;
@@ -228,12 +251,25 @@ const PayloadDetailPanel = ({
             )}
             {versions.length > 1 && (
               <select
-                value={activeKey}
+                value={releaseChannel}
+                onChange={(e) => changeReleaseChannel(e.target.value)}
+                aria-label="Release channel"
+                title="Release channel (saved for this payload in this browser)"
+                className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/15 text-white font-semibold text-xs sm:text-sm shrink-0 focus:outline-none focus:border-ps-blue cursor-pointer"
+              >
+                <option value="all" className="bg-ps-card text-white">All releases</option>
+                <option value="stable" className="bg-ps-card text-white">Stable only</option>
+                <option value="experimental" className="bg-ps-card text-white">Pre-releases only</option>
+              </select>
+            )}
+            {channelVersions.length > 1 && (
+              <select
+                value={versionKey(active)}
                 onChange={(e) => setActiveKey(e.target.value)}
                 aria-label={t("payload_detail.choose_version", "Choose version")}
                 className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/15 text-white font-semibold text-xs sm:text-sm shrink-0 focus:outline-none focus:border-ps-blue cursor-pointer"
               >
-                {versions.map((v) => {
+                {channelVersions.map((v) => {
                   const ch = v.channel ? String(v.channel).toLowerCase() : '';
                   const label =
                     (String(v.version || '').startsWith('v') ? v.version : `v${v.version || '?'}`) +
