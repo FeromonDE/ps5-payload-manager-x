@@ -1,6 +1,11 @@
 name: Refresh GitHub Payload Releases
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/github_release_catalog.py'
+      - '.github/workflows/prerelease-catalog.yml'
   workflow_dispatch:
   schedule:
     - cron: '17 */6 * * *'
