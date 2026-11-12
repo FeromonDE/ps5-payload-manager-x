@@ -9,6 +9,18 @@ permissions:
   contents: read
 
 jobs:
+  release-catalog:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check Python source syntax
+        run: python3 -m py_compile tools/github_release_catalog.py
+      - name: Test stable, prerelease and ambiguous-asset selection
+        run: python3 -m unittest discover -s tools -p 'test_github_release_catalog.py'
+
   http-responses:
     runs-on: ubuntu-latest
     steps:
